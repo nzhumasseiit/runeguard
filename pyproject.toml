@@ -17,5 +17,8 @@ dependencies = [
 [project.scripts]
 runeguard = "runeguard.cli:app"
 
+[tool.setuptools.packages.find]
+include = ["runeguard*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

