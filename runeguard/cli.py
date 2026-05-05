@@ -23,7 +23,9 @@ def run(
     Run a command through RuneGuard policy checks.
     """
     if not ctx.args:
-        raise typer.BadParameter("Pass a command after '--', for example: runeguard run -- python app.py")
+        typer.echo("Pass a command after '--'", err=True)
+        typer.echo("Example: runeguard run -- python examples/fake_agent/agent.py", err=True)
+        raise typer.Exit(2)
 
     policy_obj = Policy.from_file(policy)
     guard = RuneGuardProxy(policy_obj)

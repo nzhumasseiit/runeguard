@@ -21,7 +21,9 @@ def test_demo_command_runs():
 def test_run_command_requires_separator_and_command():
     result = runner.invoke(app, ["run"])
     assert result.exit_code != 0
-    assert "Pass a command after '--'" in result.stdout
+    output = result.stdout + result.stderr
+    assert "Pass a command after '--'" in output
+    assert "Example: runeguard run -- python examples/fake_agent/agent.py" in output
 
 
 def test_run_command_allows_safe_subprocess():
