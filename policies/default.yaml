@@ -1,0 +1,18 @@
+protected_paths:
+  - ".env"
+  - "secrets/"
+  - "~/.ssh/"
+
+allowed_domains:
+  - "localhost"
+  - "api.openai.com"
+
+blocked_commands:
+  - "rm -rf"
+  - "curl"
+  - "nc"
+  - "scp"
+
+require_approval:
+  - "send_email"
+  - "external_http_post"

