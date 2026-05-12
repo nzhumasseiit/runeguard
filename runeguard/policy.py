@@ -11,6 +11,10 @@ from .decision import Decision, DecisionType
 
 @dataclass(frozen=True)
 class PolicyConfig:
+    sandbox_backend: str = "docker"
+    network: str = "deny_all"
+    readonly_rootfs: bool = True
+    readonly_workspace: bool = True
     protected_paths: list[str] = field(default_factory=list)
     writable_paths: list[str] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
@@ -40,6 +44,10 @@ class Policy:
             self.config = PolicyConfig.from_mapping(data)
 
         self.protected_paths = self.config.protected_paths
+        self.sandbox_backend = self.config.sandbox_backend
+        self.network = self.config.network
+        self.readonly_rootfs = self.config.readonly_rootfs
+        self.readonly_workspace = self.config.readonly_workspace
         self.writable_paths = self.config.writable_paths
         self.allowed_domains = self.config.allowed_domains
         self.blocked_commands = self.config.blocked_commands
@@ -210,3 +218,15 @@ class Policy:
 
         if not isinstance(self.max_file_size_mb, int) or self.max_file_size_mb < 1:
             raise ValueError("max_file_size_mb must be a positive integer")
+
+        if self.sandbox_backend not in {"docker", "host"}:
+            raise ValueError("sandbox_backend must be one of: docker, host")
+
+        if self.network not in {"deny_all", "none", "host", "bridge"}:
+            raise ValueError("network must be one of: deny_all, none, host, bridge")
+
+        if not isinstance(self.readonly_rootfs, bool):
+            raise ValueError("readonly_rootfs must be a boolean")
+
+        if not isinstance(self.readonly_workspace, bool):
+            raise ValueError("readonly_workspace must be a boolean")

@@ -1,4 +1,5 @@
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,60 @@ app.add_typer(ebpf_app, name="ebpf")
 app.add_typer(mcp_app, name="mcp")
 
 
+INIT_POLICY = """# RuneGuard starter policy.
+sandbox_backend: docker
+network: deny_all
+readonly_rootfs: true
+readonly_workspace: true
+
+protected_paths:
+  - ".env"
+  - ".git/"
+  - "~/.ssh/"
+  - "~/.aws/"
+  - "~/.config/"
+
+writable_paths:
+  - "./src"
+  - "./tests"
+  - "./tmp"
+
+allowed_domains:
+  - "localhost"
+
+blocked_commands:
+  - "rm -rf"
+  - "curl"
+  - "nc"
+  - "scp"
+
+require_approval:
+  - "send_email"
+  - "external_http_post"
+
+allowed_env_vars:
+  - "PATH"
+  - "HOME"
+  - "LANG"
+  - "LC_ALL"
+  - "RUNEGUARD_SOCKET"
+  - "RUNEGUARD_POLICY"
+
+max_file_size_mb: 10
+"""
+
+RUNEGUARD_README = """# RuneGuard local state
+
+This directory stores local RuneGuard runtime files such as audit logs.
+
+Suggested audit log path:
+
+```bash
+.runeguard/audit.jsonl
+```
+"""
+
+
 @app.command(
     context_settings={
         "allow_extra_args": True,
@@ -39,7 +94,7 @@ def run(
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
     audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
     json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
-    backend: str = typer.Option("docker", help="Execution backend: docker or host."),
+    backend: str | None = typer.Option(None, help="Execution backend: docker or host."),
     image: str = typer.Option("python:3.12-slim", help="Docker image for the docker backend."),
     workspace: Path = typer.Option(Path.cwd(), help="Workspace directory to mount into the sandbox."),
     unsafe_writable_workspace: bool = typer.Option(
@@ -49,7 +104,7 @@ def run(
     memory: str = typer.Option("512m", help="Docker memory limit."),
     cpus: str = typer.Option("1", help="Docker CPU limit."),
     pids_limit: int = typer.Option(256, help="Docker process count limit."),
-    network: str = typer.Option("none", help="Docker network mode. Defaults to none."),
+    network: str | None = typer.Option(None, help="Docker network mode. Defaults to policy deny_all."),
     preload: bool = typer.Option(False, help="Run the command with the LD_PRELOAD shim."),
     seccomp: bool = typer.Option(False, help="Apply seccomp-BPF filter before running (Linux only)."),
     socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="RuneGuard daemon socket for the shim."),
@@ -64,6 +119,8 @@ def run(
         raise typer.Exit(2)
 
     policy_obj = Policy.from_file(policy)
+    if backend is None:
+        backend = policy_obj.sandbox_backend
     guard = RuneGuardProxy(policy_obj, audit_log=audit_log, json_logs=json_logs)
     command = " ".join(ctx.args)
     env = None
@@ -81,11 +138,12 @@ def run(
             image=image,
             workspace=workspace,
             unsafe_writable_workspace=unsafe_writable_workspace,
-            network=network,
+            network="none" if (network or policy_obj.network) in {"deny_all", "none"} else (network or policy_obj.network),
             memory=memory,
             cpus=cpus,
             pids_limit=pids_limit,
             user=current_user_container_id(),
+            readonly_rootfs=policy_obj.readonly_rootfs,
         )
         runner = DockerSandboxRunner(
             policy_obj,
@@ -145,6 +203,81 @@ def run(
         raise typer.Exit(1)
 
     raise typer.Exit(result)
+
+
+@app.command()
+def init(
+    force: bool = typer.Option(False, "--force", help="Overwrite existing runeguard.yaml."),
+):
+    """
+    Create a starter RuneGuard policy and local state directory.
+    """
+    policy_path = Path("runeguard.yaml")
+    state_dir = Path(".runeguard")
+    state_readme = state_dir / "README.md"
+    audit_path = state_dir / "audit.jsonl"
+
+    if policy_path.exists() and not force:
+        typer.echo("runeguard.yaml already exists. Use --force to overwrite.", err=True)
+        raise typer.Exit(1)
+
+    policy_path.write_text(INIT_POLICY, encoding="utf-8")
+    state_dir.mkdir(exist_ok=True)
+    if not state_readme.exists():
+        state_readme.write_text(RUNEGUARD_README, encoding="utf-8")
+    if not audit_path.exists():
+        audit_path.touch()
+
+    typer.echo("Created runeguard.yaml")
+    typer.echo("Created .runeguard/")
+    typer.echo("Created .runeguard/audit.jsonl")
+
+
+@app.command()
+def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to check.")):
+    """
+    Check local RuneGuard sandbox prerequisites.
+    """
+    checks = []
+    critical_failures = 0
+
+    docker_path = shutil.which("docker")
+    if docker_path:
+        checks.append(("ok", f"Docker executable found: {docker_path}"))
+    else:
+        checks.append(("fail", "Docker executable not found"))
+        critical_failures += 1
+
+    if docker_path and _docker_daemon_reachable():
+        checks.append(("ok", "Docker daemon reachable"))
+    else:
+        checks.append(("fail", "Docker daemon not reachable"))
+        critical_failures += 1
+
+    os_name = platform.system() or "unknown"
+    checks.append(("info", f"OS: {os_name}"))
+
+    if os_name == "Linux":
+        checks.append(("ok" if _linux_seccomp_likely_available() else "warn", "Linux seccomp likely available"))
+        checks.append(("ok" if _linux_landlock_likely_available() else "warn", "Linux Landlock likely available"))
+    else:
+        checks.append(("warn", "seccomp is Linux-only"))
+        checks.append(("warn", "Landlock is Linux-only"))
+
+    policy_path = Path(policy)
+    if policy_path.exists():
+        checks.append(("ok", f"Policy file exists: {policy}"))
+    elif policy == "runeguard.yaml" and Path("policies/default.yaml").exists():
+        checks.append(("ok", "Default policy file exists: policies/default.yaml"))
+    else:
+        checks.append(("fail", f"Policy file not found: {policy}"))
+        critical_failures += 1
+
+    for status, message in checks:
+        typer.echo(f"[{status.upper()}] {message}")
+
+    if critical_failures:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -316,6 +449,40 @@ def mcp_serve(
 def _run_subprocess(command: str, argv: list[str], env: dict[str, str] | None = None) -> int:
     completed = subprocess.run(argv, check=False, env=env)
     return completed.returncode
+
+
+def _docker_daemon_reachable() -> bool:
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return False
+
+    return result.returncode == 0
+
+
+def _linux_seccomp_likely_available() -> bool:
+    if platform.system() != "Linux":
+        return False
+
+    status_path = Path("/proc/self/status")
+    try:
+        status = status_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+    return "Seccomp:" in status
+
+
+def _linux_landlock_likely_available() -> bool:
+    if platform.system() != "Linux":
+        return False
+
+    return Path("/proc/self/attr/landlock").exists() or Path("/sys/kernel/security/landlock").exists()
 
 
 if __name__ == "__main__":

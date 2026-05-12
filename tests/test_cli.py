@@ -12,6 +12,91 @@ def test_check_command_loads_policy():
     assert "Policy loaded" in result.stdout
 
 
+def test_init_creates_policy_and_state_files():
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["init"])
+
+        assert result.exit_code == 0
+        from pathlib import Path
+
+        policy = Path("runeguard.yaml")
+        assert policy.exists()
+        assert Path(".runeguard").is_dir()
+        assert Path(".runeguard/audit.jsonl").exists()
+        assert Path(".runeguard/README.md").exists()
+
+        content = policy.read_text(encoding="utf-8")
+        assert "sandbox_backend: docker" in content
+        assert "network: deny_all" in content
+        assert "readonly_rootfs: true" in content
+        assert "readonly_workspace: true" in content
+        assert '  - "./src"' in content
+        assert '  - ".env"' in content
+        assert '  - "~/.ssh/"' in content
+
+
+def test_init_refuses_to_overwrite_without_force():
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 1
+        output = result.stdout + result.stderr
+        assert "already exists" in output
+
+
+def test_init_force_overwrites_policy():
+    with runner.isolated_filesystem():
+        from pathlib import Path
+
+        Path("runeguard.yaml").write_text("sandbox_backend: host\n", encoding="utf-8")
+        result = runner.invoke(app, ["init", "--force"])
+
+        assert result.exit_code == 0
+        assert "sandbox_backend: docker" in Path("runeguard.yaml").read_text(encoding="utf-8")
+
+
+def test_doctor_passes_when_critical_requirements_exist(monkeypatch):
+    def fake_run(argv, check, stdout, stderr):
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("runeguard.cli.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("runeguard.cli.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["doctor", "--policy", "policies/default.yaml"])
+
+    assert result.exit_code == 0
+    assert "Docker executable found" in result.stdout
+    assert "Docker daemon reachable" in result.stdout
+
+
+def test_doctor_fails_when_docker_missing(monkeypatch):
+    monkeypatch.setattr("runeguard.cli.shutil.which", lambda name: None)
+
+    result = runner.invoke(app, ["doctor", "--policy", "policies/default.yaml"])
+
+    assert result.exit_code == 1
+    assert "Docker executable not found" in result.stdout
+
+
+def test_doctor_fails_when_policy_missing(monkeypatch):
+    def fake_run(argv, check, stdout, stderr):
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("runeguard.cli.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("runeguard.cli.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["doctor", "--policy", "missing.yaml"])
+
+    assert result.exit_code == 1
+    assert "Policy file not found" in result.stdout
+
+
 def test_demo_command_runs():
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == 0

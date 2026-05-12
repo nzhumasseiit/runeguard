@@ -73,6 +73,11 @@ class DockerSandboxRunner:
         return completed.returncode
 
     def build_docker_argv(self, command_argv: list[str]) -> list[str]:
+        if not self.policy.readonly_workspace and not self.config.unsafe_writable_workspace:
+            raise ValueError(
+                "policy readonly_workspace=false requires --unsafe-writable-workspace"
+            )
+
         docker_argv = [
             "docker",
             "run",
@@ -83,7 +88,7 @@ class DockerSandboxRunner:
             "--user",
             self.config.user,
             "--network",
-            self.config.network,
+            self._docker_network_mode(),
             "--memory",
             self.config.memory,
             "--cpus",
@@ -96,7 +101,7 @@ class DockerSandboxRunner:
             "no-new-privileges",
         ]
 
-        if self.config.readonly_rootfs:
+        if self.config.readonly_rootfs and self.policy.readonly_rootfs:
             docker_argv.append("--read-only")
 
         for tmpfs_mount in self.config.tmpfs_mounts:
@@ -133,6 +138,15 @@ class DockerSandboxRunner:
             )
 
         return mounts
+
+    def _docker_network_mode(self) -> str:
+        if self.config.network == "none":
+            return "none"
+
+        if self.policy.network in {"deny_all", "none"}:
+            return "none"
+
+        return self.config.network
 
     def _resolve_writable_path(self, path: str) -> Path:
         raw_path = Path(os.path.expanduser(path))

@@ -72,6 +72,8 @@ Limitations:
 
 The CLI exposes the policy and sandbox layers for testers:
 
+- `runeguard init` creates a starter `runeguard.yaml` and `.runeguard/` state directory
+- `runeguard doctor` checks Docker, OS, seccomp/Landlock hints, and policy presence
 - `runeguard check` loads and prints a policy summary
 - `runeguard demo` runs the poisoned README scenario
 - `runeguard eval` evaluates one action without executing it

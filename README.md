@@ -33,6 +33,18 @@ runeguard check
 runeguard demo
 ```
 
+Initialize a project policy and local RuneGuard state:
+
+```bash
+runeguard init
+runeguard doctor
+```
+
+`runeguard init` creates `runeguard.yaml`, `.runeguard/`, and
+`.runeguard/audit.jsonl`. The generated policy uses the Docker backend,
+denies network by default, keeps the root filesystem and workspace read-only,
+and grants writable mounts only for `./src`, `./tests`, and `./tmp`.
+
 Run a command in the Docker sandbox backend:
 
 ```bash
