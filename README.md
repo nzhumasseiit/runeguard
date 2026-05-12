@@ -33,6 +33,12 @@ runeguard check
 runeguard demo
 ```
 
+Run the named poisoned README example:
+
+```bash
+runeguard examples poisoned-readme
+```
+
 Initialize a project policy and local RuneGuard state:
 
 ```bash
@@ -88,6 +94,7 @@ Write a JSONL audit log:
 
 ```bash
 runeguard demo --audit-log .runeguard/audit.jsonl
+runeguard report .runeguard/audit.jsonl --html
 ```
 
 Start the policy daemon for process-level interception:
@@ -134,6 +141,9 @@ Working now:
 - `runeguard run -- <command>` Docker sandbox runner
 - optional `runeguard run --backend host -- <command>` policy wrapper
 - `runeguard eval <tool>` dry policy evaluation
+- `runeguard init` stable schema v1 policy generation
+- `runeguard doctor` environment and policy checks
+- `runeguard report <audit.jsonl> --html` audit reports
 - Unix socket policy daemon
 - Linux LD_PRELOAD shim source and build target
 - BCC/eBPF tracer foundation for `execve`, `openat`, and `connect`

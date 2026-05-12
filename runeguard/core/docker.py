@@ -1,5 +1,8 @@
 import os
+import shutil
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +30,7 @@ class DockerSandboxConfig:
     cpus: str = "1"
     pids_limit: int = 256
     user: str = "65532:65532"
+    filtered_workspace: bool = True
 
 
 class DockerSandboxRunner:
@@ -51,28 +55,35 @@ class DockerSandboxRunner:
         if decision.type != DecisionType.ALLOW:
             raise PermissionError(decision.reason)
 
-        docker_argv = self.build_docker_argv(argv)
-        self._log_event(
-            "sandbox.docker",
-            Decision(DecisionType.ALLOW, "starting Docker sandbox"),
-            {
-                "image": self.config.image,
-                "workspace": str(self.workspace),
-                "unsafe_writable_workspace": self.config.unsafe_writable_workspace,
-                "readonly_rootfs": self.config.readonly_rootfs,
-                "tmpfs_mounts": list(self.config.tmpfs_mounts),
-                "writable_paths": self.policy.writable_paths,
-                "network": self.config.network,
-                "memory": self.config.memory,
-                "cpus": self.config.cpus,
-                "pids_limit": self.config.pids_limit,
-                "user": self.config.user,
-            },
-        )
-        completed = subprocess.run(docker_argv, check=False)
-        return completed.returncode
+        with self._workspace_mount_source() as mount_source:
+            docker_argv = self.build_docker_argv(argv, workspace_source=mount_source)
+            self._log_event(
+                "sandbox.docker",
+                Decision(DecisionType.ALLOW, "starting Docker sandbox"),
+                {
+                    "image": self.config.image,
+                    "workspace": str(self.workspace),
+                    "workspace_mount_source": str(mount_source),
+                    "unsafe_writable_workspace": self.config.unsafe_writable_workspace,
+                    "readonly_rootfs": self.config.readonly_rootfs,
+                    "tmpfs_mounts": list(self.config.tmpfs_mounts),
+                    "writable_paths": self.policy.writable_paths,
+                    "network": self.config.network,
+                    "memory": self.config.memory,
+                    "cpus": self.config.cpus,
+                    "pids_limit": self.config.pids_limit,
+                    "user": self.config.user,
+                },
+            )
+            completed = subprocess.run(docker_argv, check=False)
+            return completed.returncode
 
-    def build_docker_argv(self, command_argv: list[str]) -> list[str]:
+    def build_docker_argv(
+        self,
+        command_argv: list[str],
+        *,
+        workspace_source: Path | None = None,
+    ) -> list[str]:
         if not self.policy.readonly_workspace and not self.config.unsafe_writable_workspace:
             raise ValueError(
                 "policy readonly_workspace=false requires --unsafe-writable-workspace"
@@ -84,7 +95,7 @@ class DockerSandboxRunner:
             "--rm",
             "--workdir",
             CONTAINER_WORKDIR,
-            *self._mount_args(),
+            *self._mount_args(workspace_source=workspace_source),
             "--user",
             self.config.user,
             "--network",
@@ -116,8 +127,8 @@ class DockerSandboxRunner:
         self._validate_safe_mount_source(workspace, allow_inside_home=True)
         return workspace
 
-    def _mount_args(self) -> list[str]:
-        workspace = self.workspace
+    def _mount_args(self, *, workspace_source: Path | None = None) -> list[str]:
+        workspace = Path(workspace_source).resolve(strict=True) if workspace_source else self.workspace
         mode = "rw" if self.config.unsafe_writable_workspace else "readonly"
         mounts = [
             "--mount",
@@ -143,14 +154,48 @@ class DockerSandboxRunner:
         if self.config.network == "none":
             return "none"
 
-        if self.policy.network in {"deny_all", "none"}:
+        if self.policy.network in {"deny", "deny_all", "none"}:
             return "none"
 
         return self.config.network
 
+    @contextmanager
+    def _workspace_mount_source(self):
+        if self.config.unsafe_writable_workspace or not self.config.filtered_workspace:
+            yield self.workspace
+            return
+
+        with tempfile.TemporaryDirectory(prefix="runeguard-workspace-") as tmpdir:
+            filtered = Path(tmpdir) / "workspace"
+            filtered.mkdir()
+            self._copy_filtered_workspace(filtered)
+            yield filtered
+
+    def _copy_filtered_workspace(self, destination: Path):
+        workspace = self.workspace
+        for source in workspace.rglob("*"):
+            relative = source.relative_to(workspace)
+            relative_text = str(relative).replace(os.sep, "/")
+
+            if self.policy.is_denied_workspace_path(relative_text):
+                continue
+
+            if not self.policy.is_allowed_workspace_path(relative_text):
+                continue
+
+            target = destination / relative
+            if source.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
     def _resolve_writable_path(self, path: str) -> Path:
         raw_path = Path(os.path.expanduser(path))
         source = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+        if not source.exists() and not raw_path.is_absolute():
+            source.mkdir(parents=True, exist_ok=True)
         source = source.resolve(strict=True)
         self._validate_safe_mount_source(source, allow_inside_home=True)
 

@@ -1,7 +1,8 @@
 # Threat Model
 
-RuneGuard focuses on policy decisions around actions an AI coding agent asks to
-perform, plus an initial Docker sandbox backend for stronger process isolation.
+RuneGuard protects local and CI coding-agent runs from secret access,
+destructive commands, and network exfiltration. It combines policy decisions
+with a Docker sandbox backend for stronger process isolation.
 
 ## Assets
 

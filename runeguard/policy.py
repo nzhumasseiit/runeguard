@@ -1,6 +1,7 @@
 import os
 import shlex
 from dataclasses import asdict, dataclass, field
+from fnmatch import fnmatch
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,11 +12,13 @@ from .decision import Decision, DecisionType
 
 @dataclass(frozen=True)
 class PolicyConfig:
+    version: int = 1
     sandbox_backend: str = "docker"
-    network: str = "deny_all"
+    network: str = "deny"
     readonly_rootfs: bool = True
     readonly_workspace: bool = True
     protected_paths: list[str] = field(default_factory=list)
+    allowed_paths: list[str] = field(default_factory=list)
     writable_paths: list[str] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
     blocked_commands: list[str] = field(default_factory=list)
@@ -25,6 +28,7 @@ class PolicyConfig:
 
     @classmethod
     def from_mapping(cls, data: dict):
+        data = normalize_policy_mapping(data)
         allowed_keys = set(cls.__dataclass_fields__)
         unknown_keys = sorted(set(data) - allowed_keys)
         if unknown_keys:
@@ -44,6 +48,8 @@ class Policy:
             self.config = PolicyConfig.from_mapping(data)
 
         self.protected_paths = self.config.protected_paths
+        self.version = self.config.version
+        self.allowed_paths = self.config.allowed_paths
         self.sandbox_backend = self.config.sandbox_backend
         self.network = self.config.network
         self.readonly_rootfs = self.config.readonly_rootfs
@@ -82,7 +88,7 @@ class Policy:
         if tool_name in {"shell", "execve"}:
             command = kwargs.get("command", "")
             for blocked in self.blocked_commands:
-                if self._matches_command_pattern(blocked, command, kwargs.get("argv")):
+                if fnmatch(command, blocked) or self._matches_command_pattern(blocked, command, kwargs.get("argv")):
                     return Decision(
                         DecisionType.BLOCK,
                         f"blocked shell command pattern: {blocked}",
@@ -106,6 +112,9 @@ class Policy:
         return Decision(DecisionType.ALLOW, "allowed by policy")
 
     def _is_protected_path(self, path: str) -> bool:
+        if self.is_denied_workspace_path(path):
+            return True
+
         candidate = self._normalize_path(path)
         candidate_parts = candidate.parts
 
@@ -136,6 +145,36 @@ class Policy:
                 return True
 
         return False
+
+    def is_denied_workspace_path(self, path: str) -> bool:
+        normalized = str(Path(os.path.expanduser(path))).replace(os.sep, "/").lstrip("./")
+        candidates = {normalized, Path(normalized).name}
+
+        for pattern in self.protected_paths:
+            normalized_pattern = pattern.replace(os.sep, "/").lstrip("./")
+            if normalized_pattern.startswith("~/"):
+                continue
+
+            if normalized_pattern.endswith("/"):
+                normalized_pattern = f"{normalized_pattern}**"
+
+            for candidate in candidates:
+                if fnmatch(candidate, normalized_pattern):
+                    return True
+
+                if normalized_pattern.endswith("/**"):
+                    prefix = normalized_pattern[:-3].rstrip("/")
+                    if candidate == prefix or candidate.startswith(f"{prefix}/"):
+                        return True
+
+        return False
+
+    def is_allowed_workspace_path(self, path: str) -> bool:
+        if not self.allowed_paths:
+            return True
+
+        normalized = str(Path(path)).replace(os.sep, "/").lstrip("./")
+        return any(fnmatch(normalized, pattern.lstrip("./")) for pattern in self.allowed_paths)
 
     def _is_allowed_domain(self, domain: str) -> bool:
         domain = domain.lower().rstrip(".")
@@ -202,6 +241,7 @@ class Policy:
     def _validate(self):
         fields = {
             "protected_paths": self.protected_paths,
+            "allowed_paths": self.allowed_paths,
             "writable_paths": self.writable_paths,
             "allowed_domains": self.allowed_domains,
             "blocked_commands": self.blocked_commands,
@@ -222,11 +262,40 @@ class Policy:
         if self.sandbox_backend not in {"docker", "host"}:
             raise ValueError("sandbox_backend must be one of: docker, host")
 
-        if self.network not in {"deny_all", "none", "host", "bridge"}:
-            raise ValueError("network must be one of: deny_all, none, host, bridge")
+        if self.network not in {"deny", "deny_all", "none", "host", "bridge"}:
+            raise ValueError("network must be one of: deny, deny_all, none, host, bridge")
 
         if not isinstance(self.readonly_rootfs, bool):
             raise ValueError("readonly_rootfs must be a boolean")
 
         if not isinstance(self.readonly_workspace, bool):
             raise ValueError("readonly_workspace must be a boolean")
+
+        if self.version != 1:
+            raise ValueError("unsupported policy version; fix by setting version: 1")
+
+
+def normalize_policy_mapping(data: dict) -> dict:
+    if "sandbox" not in data and "files" not in data and "network" not in data and "shell" not in data:
+        return data
+
+    sandbox = data.get("sandbox", {}) or {}
+    files = data.get("files", {}) or {}
+    network = data.get("network", {}) or {}
+    shell = data.get("shell", {}) or {}
+
+    return {
+        "version": data.get("version", 1),
+        "sandbox_backend": sandbox.get("backend", "docker"),
+        "network": network.get("default", sandbox.get("network", "deny")),
+        "readonly_rootfs": sandbox.get("readonly_rootfs", True),
+        "readonly_workspace": sandbox.get("readonly_workspace", True),
+        "protected_paths": files.get("deny", []),
+        "allowed_paths": files.get("allow", []),
+        "writable_paths": sandbox.get("writable_paths", []),
+        "allowed_domains": network.get("allow_domains", []),
+        "blocked_commands": shell.get("deny_patterns", []),
+        "require_approval": data.get("require_approval", []),
+        "allowed_env_vars": data.get("allowed_env_vars", []),
+        "max_file_size_mb": data.get("max_file_size_mb", 10),
+    }

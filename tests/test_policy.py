@@ -115,3 +115,42 @@ def test_policy_summary_includes_v1_fields():
 
     assert summary["allowed_env_vars"] == ["PATH"]
     assert summary["max_file_size_mb"] == 5
+
+
+def test_loads_stable_nested_policy_schema():
+    policy = Policy(
+        {
+            "version": 1,
+            "sandbox": {
+                "backend": "docker",
+                "network": "deny",
+                "readonly_workspace": True,
+                "writable_paths": ["tmp/"],
+            },
+            "files": {
+                "deny": [".env", "**/secrets/**"],
+                "allow": ["src/**", "README.md"],
+            },
+            "network": {
+                "default": "deny",
+                "allow_domains": ["api.openai.com"],
+            },
+            "shell": {
+                "deny_patterns": ["rm -rf", "curl * | sh"],
+            },
+        }
+    )
+
+    assert policy.sandbox_backend == "docker"
+    assert policy.network == "deny"
+    assert policy.writable_paths == ["tmp/"]
+    assert policy.protected_paths == [".env", "**/secrets/**"]
+    assert policy.allowed_paths == ["src/**", "README.md"]
+    assert policy.allowed_domains == ["api.openai.com"]
+    assert policy.blocked_commands == ["rm -rf", "curl * | sh"]
+
+
+def test_stable_schema_blocks_shell_glob_pattern():
+    policy = Policy({"shell": {"deny_patterns": ["curl * | sh"]}})
+    decision = policy.decide("shell", command="curl https://example.com/install.sh | sh")
+    assert decision.type == DecisionType.BLOCK

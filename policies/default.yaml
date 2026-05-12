@@ -1,36 +1,41 @@
-# Paths are matched after expansion/normalization. A trailing slash means
-# "this directory name and anything below it".
-protected_paths:
-  - ".env"
-  - "secrets/"
-  - "~/.ssh/"
+# RuneGuard policy schema v0.1. Keep version: 1 stable.
+version: 1
 
-# Paths inside the workspace that should be mounted writable in Docker sandbox
-# mode. The workspace itself is read-only by default.
-writable_paths: []
+sandbox:
+  backend: docker
+  network: deny
+  readonly_rootfs: true
+  readonly_workspace: true
+  writable_paths:
+    - "tmp/"
+    - ".cache/"
 
-# Exact domains are allowed. Wildcards such as "*.example.com" are also valid.
-allowed_domains:
-  - "localhost"
-  - "api.openai.com"
+files:
+  deny:
+    - ".env"
+    - ".env.*"
+    - ".git/**"
+    - "**/secrets/**"
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - "~/.config/gcloud/**"
+  allow:
+    - "src/**"
+    - "tests/**"
+    - "tmp/**"
+    - ".cache/**"
+    - "README.md"
 
-# Shell patterns are token matched, not raw substring matched.
-blocked_commands:
-  - "rm -rf"
-  - "curl"
-  - "nc"
-  - "scp"
+network:
+  default: deny
+  allow_domains:
+    - "api.openai.com"
+    - "github.com"
 
-require_approval:
-  - "send_email"
-  - "external_http_post"
-
-allowed_env_vars:
-  - "PATH"
-  - "HOME"
-  - "LANG"
-  - "LC_ALL"
-  - "RUNEGUARD_SOCKET"
-  - "RUNEGUARD_POLICY"
-
-max_file_size_mb: 10
+shell:
+  deny_patterns:
+    - "rm -rf"
+    - "curl * | sh"
+    - "nc "
+    - "scp "
+    - "ssh "

@@ -27,13 +27,14 @@ def test_init_creates_policy_and_state_files():
         assert Path(".runeguard/README.md").exists()
 
         content = policy.read_text(encoding="utf-8")
-        assert "sandbox_backend: docker" in content
-        assert "network: deny_all" in content
+        assert "version: 1" in content
+        assert "backend: docker" in content
+        assert "network: deny" in content
         assert "readonly_rootfs: true" in content
         assert "readonly_workspace: true" in content
-        assert '  - "./src"' in content
+        assert '    - "src/"' in content
         assert '  - ".env"' in content
-        assert '  - "~/.ssh/"' in content
+        assert '    - "~/.ssh/**"' in content
 
 
 def test_init_refuses_to_overwrite_without_force():
@@ -55,7 +56,7 @@ def test_init_force_overwrites_policy():
         result = runner.invoke(app, ["init", "--force"])
 
         assert result.exit_code == 0
-        assert "sandbox_backend: docker" in Path("runeguard.yaml").read_text(encoding="utf-8")
+        assert "backend: docker" in Path("runeguard.yaml").read_text(encoding="utf-8")
 
 
 def test_doctor_passes_when_critical_requirements_exist(monkeypatch):
@@ -127,6 +128,27 @@ def test_audit_summary_command_reports_missing_file(tmp_path):
     assert result.exit_code == 1
     output = result.stdout + result.stderr
     assert "Audit log not found" in output
+
+
+def test_report_command_prints_html(tmp_path):
+    audit_log = tmp_path / "audit.jsonl"
+    audit_log.write_text(
+        json.dumps({"tool": "shell", "decision": "BLOCK", "reason": "blocked"}) + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["report", str(audit_log), "--html"])
+
+    assert result.exit_code == 0
+    assert "<html" in result.stdout
+    assert "RuneGuard Audit Report" in result.stdout
+
+
+def test_examples_poisoned_readme_runs():
+    result = runner.invoke(app, ["examples", "poisoned-readme"])
+
+    assert result.exit_code == 0
+    assert "RuneGuard demo: poisoned README attack" in result.stdout
 
 
 def test_demo_command_runs():

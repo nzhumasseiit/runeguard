@@ -1,3 +1,4 @@
+import json
 import platform
 import shutil
 import subprocess
@@ -5,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from .audit import summarize_audit_log
+from .audit import render_summary_html, render_summary_text, summarize_audit_log
 from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
 from .ebpf import EbpfTracer
@@ -24,54 +25,57 @@ shim_app = typer.Typer(help="Build and inspect the LD_PRELOAD shim.")
 ebpf_app = typer.Typer(help="Run Linux eBPF tracing.")
 mcp_app = typer.Typer(help="MCP proxy and server commands.")
 audit_app = typer.Typer(help="Audit log commands.")
+examples_app = typer.Typer(help="Runnable RuneGuard examples.")
 
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(shim_app, name="shim")
 app.add_typer(ebpf_app, name="ebpf")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(audit_app, name="audit")
+app.add_typer(examples_app, name="examples")
 
 
-INIT_POLICY = """# RuneGuard starter policy.
-sandbox_backend: docker
-network: deny_all
-readonly_rootfs: true
-readonly_workspace: true
+INIT_POLICY = """# RuneGuard policy schema v0.1. Keep version: 1 stable.
+version: 1
 
-protected_paths:
-  - ".env"
-  - ".git/"
-  - "~/.ssh/"
-  - "~/.aws/"
-  - "~/.config/"
+sandbox:
+  backend: docker
+  network: deny
+  readonly_rootfs: true
+  readonly_workspace: true
+  writable_paths:
+    - "src/"
+    - "tests/"
+    - "tmp/"
 
-writable_paths:
-  - "./src"
-  - "./tests"
-  - "./tmp"
+files:
+  deny:
+    - ".env"
+    - ".env.*"
+    - ".git/**"
+    - "**/secrets/**"
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - "~/.config/gcloud/**"
+  allow:
+    - "src/**"
+    - "tests/**"
+    - "tmp/**"
+    - "README.md"
 
-allowed_domains:
-  - "localhost"
+network:
+  default: deny
+  allow_domains:
+    - "api.openai.com"
+    - "github.com"
 
-blocked_commands:
-  - "rm -rf"
-  - "curl"
-  - "nc"
-  - "scp"
-
-require_approval:
-  - "send_email"
-  - "external_http_post"
-
-allowed_env_vars:
-  - "PATH"
-  - "HOME"
-  - "LANG"
-  - "LC_ALL"
-  - "RUNEGUARD_SOCKET"
-  - "RUNEGUARD_POLICY"
-
-max_file_size_mb: 10
+shell:
+  deny_patterns:
+    - "rm -rf"
+    - "curl * | sh"
+    - "nc "
+    - "scp "
+    - "ssh "
 """
 
 RUNEGUARD_README = """# RuneGuard local state
@@ -119,6 +123,7 @@ def run(
     if not ctx.args:
         typer.echo("Pass a command after '--'", err=True)
         typer.echo("Example: runeguard run -- python examples/fake_agent/agent.py", err=True)
+        typer.echo("Fix: put your command after the '--' separator.", err=True)
         raise typer.Exit(2)
 
     policy_obj = Policy.from_file(policy)
@@ -129,12 +134,12 @@ def run(
     env = None
 
     if backend not in {"docker", "host"}:
-        typer.echo("Backend must be one of: docker, host", err=True)
+        typer.echo("Backend must be one of: docker, host. Fix: use --backend docker or --backend host.", err=True)
         raise typer.Exit(2)
 
     if backend == "docker":
         if preload or seccomp:
-            typer.echo("--preload and --seccomp are only supported with --backend host", err=True)
+            typer.echo("--preload and --seccomp are only supported with --backend host. Fix: add --backend host or remove those flags.", err=True)
             raise typer.Exit(2)
 
         config = DockerSandboxConfig(
@@ -157,13 +162,13 @@ def run(
         try:
             raise typer.Exit(runner.run(ctx.args))
         except FileNotFoundError:
-            typer.echo("Docker executable not found. Install Docker or use --backend host.", err=True)
+            typer.echo("Docker executable not found. Fix: install Docker, start Docker Desktop, or use --backend host for policy-only execution.", err=True)
             raise typer.Exit(127)
         except PermissionError as exc:
-            typer.echo(f"Blocked: {exc}", err=True)
+            typer.echo(f"Blocked: {exc}. Fix: adjust policy or use a safer command.", err=True)
             raise typer.Exit(1)
         except ValueError as exc:
-            typer.echo(f"Invalid sandbox configuration: {exc}", err=True)
+            typer.echo(f"Invalid sandbox configuration: {exc}. Fix: run `runeguard doctor` and update runeguard.yaml.", err=True)
             raise typer.Exit(2)
 
     if preload:
@@ -178,18 +183,18 @@ def run(
 
     if seccomp:
         if platform.system() != "Linux":
-            typer.echo("--seccomp is Linux only", err=True)
+            typer.echo("--seccomp is Linux only. Fix: run on Linux or remove --seccomp.", err=True)
             raise typer.Exit(2)
 
         decision = policy_obj.decide("shell", command=command, argv=ctx.args)
         if decision.type.value != "ALLOW":
-            typer.echo(f"Blocked: {decision.reason}", err=True)
+            typer.echo(f"Blocked: {decision.reason}. Fix: adjust policy or use a safer command.", err=True)
             raise typer.Exit(1)
 
         try:
             exit_code = run_with_seccomp(ctx.args, policy_obj, env=env)
         except RuntimeError as exc:
-            typer.echo(str(exc), err=True)
+            typer.echo(f"{exc}. Fix: run on Linux with seccomp support or remove --seccomp.", err=True)
             raise typer.Exit(2)
 
         raise typer.Exit(exit_code)
@@ -202,7 +207,7 @@ def run(
             argv=ctx.args,
         )
     except PermissionError as exc:
-        typer.echo(f"Blocked: {exc}", err=True)
+        typer.echo(f"Blocked: {exc}. Fix: adjust policy or use a safer command.", err=True)
         raise typer.Exit(1)
 
     raise typer.Exit(result)
@@ -221,7 +226,7 @@ def init(
     audit_path = state_dir / "audit.jsonl"
 
     if policy_path.exists() and not force:
-        typer.echo("runeguard.yaml already exists. Use --force to overwrite.", err=True)
+        typer.echo("runeguard.yaml already exists. Fix: use --force to overwrite it.", err=True)
         raise typer.Exit(1)
 
     policy_path.write_text(INIT_POLICY, encoding="utf-8")
@@ -248,13 +253,13 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
     if docker_path:
         checks.append(("ok", f"Docker executable found: {docker_path}"))
     else:
-        checks.append(("fail", "Docker executable not found"))
+        checks.append(("fail", "Docker executable not found. Fix: install Docker or Docker Desktop."))
         critical_failures += 1
 
     if docker_path and _docker_daemon_reachable():
         checks.append(("ok", "Docker daemon reachable"))
     else:
-        checks.append(("fail", "Docker daemon not reachable"))
+        checks.append(("fail", "Docker daemon not reachable. Fix: start Docker Desktop or the Docker daemon."))
         critical_failures += 1
 
     os_name = platform.system() or "unknown"
@@ -269,11 +274,25 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
 
     policy_path = Path(policy)
     if policy_path.exists():
-        checks.append(("ok", f"Policy file exists: {policy}"))
+        try:
+            loaded_policy = Policy.from_file(str(policy_path))
+        except Exception as exc:
+            checks.append(("fail", f"Policy file is invalid: {exc}. Fix: compare it with docs/policy-schema.md."))
+            critical_failures += 1
+        else:
+            checks.append(("ok", f"Policy file exists and is valid: {policy}"))
+            for writable_path in loaded_policy.writable_paths:
+                candidate = Path(writable_path)
+                if not candidate.is_absolute():
+                    candidate = Path.cwd() / candidate
+                if candidate.exists():
+                    checks.append(("ok", f"Writable path exists: {writable_path}"))
+                else:
+                    checks.append(("warn", f"Writable path does not exist yet: {writable_path}. Fix: create it or remove it from policy."))
     elif policy == "runeguard.yaml" and Path("policies/default.yaml").exists():
         checks.append(("ok", "Default policy file exists: policies/default.yaml"))
     else:
-        checks.append(("fail", f"Policy file not found: {policy}"))
+        checks.append(("fail", f"Policy file not found: {policy}. Fix: run `runeguard init` or pass --policy policies/default.yaml."))
         critical_failures += 1
 
     for status, message in checks:
@@ -291,29 +310,51 @@ def audit_summary(audit_log: Path = typer.Argument(..., help="Path to a RuneGuar
     try:
         summary = summarize_audit_log(audit_log)
     except FileNotFoundError:
-        typer.echo(f"Audit log not found: {audit_log}", err=True)
+        typer.echo(f"Audit log not found: {audit_log}. Fix: pass an existing .runeguard/audit.jsonl path.", err=True)
         raise typer.Exit(1)
     except json.JSONDecodeError as exc:
-        typer.echo(f"Invalid JSONL audit log at line {exc.lineno}: {exc.msg}", err=True)
+        typer.echo(f"Invalid JSONL audit log at line {exc.lineno}: {exc.msg}. Fix: remove malformed lines or regenerate the audit log.", err=True)
         raise typer.Exit(2)
 
-    typer.echo(f"Total decisions: {summary['total']}")
-    typer.echo(f"Allowed: {summary['allowed']}")
-    typer.echo(f"Blocked: {summary['blocked']}")
+    typer.echo(render_summary_text(summary))
 
-    typer.echo("Blocked actions by tool:")
-    if summary["blocked_actions"]:
-        for tool, count in summary["blocked_actions"].most_common():
-            typer.echo(f"  {tool}: {count}")
-    else:
-        typer.echo("  none")
 
-    typer.echo("Top blocked reasons:")
-    if summary["blocked_reasons"]:
-        for reason, count in summary["blocked_reasons"].most_common(5):
-            typer.echo(f"  {reason}: {count}")
-    else:
-        typer.echo("  none")
+@app.command()
+def report(
+    audit_log: Path = typer.Argument(..., help="Path to a RuneGuard JSONL audit log."),
+    html: bool = typer.Option(False, "--html", help="Print an HTML audit report."),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write report to a file."),
+):
+    """
+    Generate a text or HTML audit report.
+    """
+    try:
+        summary = summarize_audit_log(audit_log)
+    except FileNotFoundError:
+        typer.echo(f"Audit log not found: {audit_log}. Fix: pass an existing .runeguard/audit.jsonl path.", err=True)
+        raise typer.Exit(1)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Invalid JSONL audit log at line {exc.lineno}: {exc.msg}. Fix: remove malformed lines or regenerate the audit log.", err=True)
+        raise typer.Exit(2)
+
+    rendered = render_summary_html(summary) if html else render_summary_text(summary)
+    if output:
+        output.write_text(rendered, encoding="utf-8")
+        typer.echo(f"Wrote report: {output}")
+        return
+
+    typer.echo(rendered)
+
+
+@examples_app.command("poisoned-readme")
+def examples_poisoned_readme(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
+):
+    """
+    Run the poisoned README prompt-injection example.
+    """
+    run_demo(policy, audit_log=audit_log)
 
 
 @app.command()
