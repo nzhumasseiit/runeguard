@@ -34,3 +34,6 @@ runeguard = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: tests that require external runtimes such as Docker"
+]

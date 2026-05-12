@@ -1,4 +1,5 @@
 from typer.testing import CliRunner
+import json
 
 from runeguard.cli import app
 
@@ -95,6 +96,37 @@ def test_doctor_fails_when_policy_missing(monkeypatch):
 
     assert result.exit_code == 1
     assert "Policy file not found" in result.stdout
+
+
+def test_audit_summary_command_prints_counts(tmp_path):
+    audit_log = tmp_path / "audit.jsonl"
+    records = [
+        {"tool": "read_file", "decision": "ALLOW", "reason": "allowed by policy"},
+        {"tool": "read_file", "decision": "BLOCK", "reason": "protected path access: .env"},
+        {"tool": "shell", "decision": "BLOCK", "reason": "blocked shell command pattern: curl"},
+    ]
+    audit_log.write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["audit", "summary", str(audit_log)])
+
+    assert result.exit_code == 0
+    assert "Total decisions: 3" in result.stdout
+    assert "Allowed: 1" in result.stdout
+    assert "Blocked: 2" in result.stdout
+    assert "read_file: 1" in result.stdout
+    assert "shell: 1" in result.stdout
+    assert "blocked shell command pattern: curl: 1" in result.stdout
+
+
+def test_audit_summary_command_reports_missing_file(tmp_path):
+    result = runner.invoke(app, ["audit", "summary", str(tmp_path / "missing.jsonl")])
+
+    assert result.exit_code == 1
+    output = result.stdout + result.stderr
+    assert "Audit log not found" in output
 
 
 def test_demo_command_runs():

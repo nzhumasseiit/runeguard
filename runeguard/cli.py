@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from .audit import summarize_audit_log
 from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
 from .ebpf import EbpfTracer
@@ -22,11 +23,13 @@ daemon_app = typer.Typer(help="Manage the RuneGuard policy daemon.")
 shim_app = typer.Typer(help="Build and inspect the LD_PRELOAD shim.")
 ebpf_app = typer.Typer(help="Run Linux eBPF tracing.")
 mcp_app = typer.Typer(help="MCP proxy and server commands.")
+audit_app = typer.Typer(help="Audit log commands.")
 
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(shim_app, name="shim")
 app.add_typer(ebpf_app, name="ebpf")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(audit_app, name="audit")
 
 
 INIT_POLICY = """# RuneGuard starter policy.
@@ -278,6 +281,39 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
 
     if critical_failures:
         raise typer.Exit(1)
+
+
+@audit_app.command("summary")
+def audit_summary(audit_log: Path = typer.Argument(..., help="Path to a RuneGuard JSONL audit log.")):
+    """
+    Print a summary of a RuneGuard JSONL audit log.
+    """
+    try:
+        summary = summarize_audit_log(audit_log)
+    except FileNotFoundError:
+        typer.echo(f"Audit log not found: {audit_log}", err=True)
+        raise typer.Exit(1)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Invalid JSONL audit log at line {exc.lineno}: {exc.msg}", err=True)
+        raise typer.Exit(2)
+
+    typer.echo(f"Total decisions: {summary['total']}")
+    typer.echo(f"Allowed: {summary['allowed']}")
+    typer.echo(f"Blocked: {summary['blocked']}")
+
+    typer.echo("Blocked actions by tool:")
+    if summary["blocked_actions"]:
+        for tool, count in summary["blocked_actions"].most_common():
+            typer.echo(f"  {tool}: {count}")
+    else:
+        typer.echo("  none")
+
+    typer.echo("Top blocked reasons:")
+    if summary["blocked_reasons"]:
+        for reason, count in summary["blocked_reasons"].most_common(5):
+            typer.echo(f"  {reason}: {count}")
+    else:
+        typer.echo("  none")
 
 
 @app.command()
