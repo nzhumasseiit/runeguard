@@ -39,9 +39,24 @@ Run a command in the Docker sandbox backend:
 runeguard run -- python -c "print('hello from guarded command')"
 ```
 
-This mounts the current workspace at `/workspace`, runs as a non-root user,
-disables networking by default, drops Linux capabilities, and applies simple
-memory/CPU/process limits.
+This mounts the current workspace at `/workspace` read-only, runs as a non-root
+user, disables networking by default, drops Linux capabilities, uses a read-only
+container root filesystem, adds small tmpfs mounts for `/tmp` and `/run`, and
+applies simple memory/CPU/process limits.
+
+Writable paths are opt-in through policy:
+
+```yaml
+writable_paths:
+  - ".cache"
+  - "tmp/output"
+```
+
+For compatibility with tools that still need a writable checkout:
+
+```bash
+runeguard run --unsafe-writable-workspace -- python build.py
+```
 
 For local development only, you can still run through the host policy wrapper:
 

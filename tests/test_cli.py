@@ -55,6 +55,8 @@ def test_run_command_uses_docker_backend_by_default(monkeypatch):
     assert calls[0][0][0:2] == ["docker", "run"]
     assert "--network" in calls[0][0]
     assert calls[0][0][calls[0][0].index("--network") + 1] == "none"
+    assert "--read-only" in calls[0][0]
+    assert "/tmp:rw,noexec,nosuid,size=64m" in calls[0][0]
 
 
 def test_run_command_reports_missing_docker(monkeypatch):
@@ -76,6 +78,26 @@ def test_run_command_rejects_preload_with_docker_backend():
     assert result.exit_code == 2
     output = result.stdout + result.stderr
     assert "only supported with --backend host" in output
+
+
+def test_run_command_supports_unsafe_writable_workspace(monkeypatch):
+    calls = []
+
+    def fake_run(argv, check):
+        calls.append((argv, check))
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("runeguard.core.docker.subprocess.run", fake_run)
+
+    result = runner.invoke(
+        app,
+        ["run", "--unsafe-writable-workspace", "--", "python", "-c", "print('guarded')"],
+    )
+
+    assert result.exit_code == 0
+    assert any("target=/workspace,rw" in arg for arg in calls[0][0])
 
 
 def test_eval_command_reports_block():

@@ -28,6 +28,8 @@ Examples:
 - deciding whether a requested shell command should be allowed
 - deciding whether a requested HTTP action targets an allowed domain
 - running commands in a Docker container with non-root execution
+- mounting the workspace read-only by default
+- allowing only policy-defined writable workspace paths
 - denying network access by default in Docker sandbox mode
 - applying simple Docker memory, CPU, and process limits
 - enforcing selected Linux libc calls through an LD_PRELOAD shim when a process is launched with `runeguard run --backend host --preload`

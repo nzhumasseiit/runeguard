@@ -42,6 +42,10 @@ def run(
     backend: str = typer.Option("docker", help="Execution backend: docker or host."),
     image: str = typer.Option("python:3.12-slim", help="Docker image for the docker backend."),
     workspace: Path = typer.Option(Path.cwd(), help="Workspace directory to mount into the sandbox."),
+    unsafe_writable_workspace: bool = typer.Option(
+        False,
+        help="Mount the whole workspace writable in Docker backend. Unsafe compatibility mode.",
+    ),
     memory: str = typer.Option("512m", help="Docker memory limit."),
     cpus: str = typer.Option("1", help="Docker CPU limit."),
     pids_limit: int = typer.Option(256, help="Docker process count limit."),
@@ -76,6 +80,7 @@ def run(
         config = DockerSandboxConfig(
             image=image,
             workspace=workspace,
+            unsafe_writable_workspace=unsafe_writable_workspace,
             network=network,
             memory=memory,
             cpus=cpus,
@@ -96,6 +101,9 @@ def run(
         except PermissionError as exc:
             typer.echo(f"Blocked: {exc}", err=True)
             raise typer.Exit(1)
+        except ValueError as exc:
+            typer.echo(f"Invalid sandbox configuration: {exc}", err=True)
+            raise typer.Exit(2)
 
     if preload:
         interceptor = RuneGuardInterceptor(

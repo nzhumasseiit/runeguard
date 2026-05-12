@@ -12,6 +12,7 @@ from .decision import Decision, DecisionType
 @dataclass(frozen=True)
 class PolicyConfig:
     protected_paths: list[str] = field(default_factory=list)
+    writable_paths: list[str] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
     blocked_commands: list[str] = field(default_factory=list)
     require_approval: list[str] = field(default_factory=list)
@@ -39,6 +40,7 @@ class Policy:
             self.config = PolicyConfig.from_mapping(data)
 
         self.protected_paths = self.config.protected_paths
+        self.writable_paths = self.config.writable_paths
         self.allowed_domains = self.config.allowed_domains
         self.blocked_commands = self.config.blocked_commands
         self.require_approval = self.config.require_approval
@@ -192,6 +194,7 @@ class Policy:
     def _validate(self):
         fields = {
             "protected_paths": self.protected_paths,
+            "writable_paths": self.writable_paths,
             "allowed_domains": self.allowed_domains,
             "blocked_commands": self.blocked_commands,
             "require_approval": self.require_approval,

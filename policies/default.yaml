@@ -5,6 +5,10 @@ protected_paths:
   - "secrets/"
   - "~/.ssh/"
 
+# Paths inside the workspace that should be mounted writable in Docker sandbox
+# mode. The workspace itself is read-only by default.
+writable_paths: []
+
 # Exact domains are allowed. Wildcards such as "*.example.com" are also valid.
 allowed_domains:
   - "localhost"

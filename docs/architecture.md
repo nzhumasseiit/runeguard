@@ -88,16 +88,20 @@ The CLI exposes the policy and sandbox layers for testers:
 
 Default behavior:
 
-- bind-mounts only the selected workspace at `/workspace`
+- bind-mounts only the selected workspace at `/workspace` read-only
+- mounts policy `writable_paths` separately as writable bind mounts
 - runs with the caller's uid/gid when possible
 - disables networking with `--network none`
 - applies memory, CPU, and process limits
 - drops Linux capabilities
 - sets `no-new-privileges`
+- uses `--read-only` for the container root filesystem
+- adds tmpfs mounts for `/tmp` and `/run`
 
 The Docker backend avoids mounting user home directories and common secret
-locations such as `~/.ssh`, `~/.aws`, and `~/.config` unless they are inside the
-explicit workspace path.
+locations such as `~/.ssh`, `~/.aws`, and `~/.config`. The unsafe compatibility
+flag `--unsafe-writable-workspace` restores the old writable workspace mount
+when a tool cannot yet operate with policy-driven writable paths.
 
 ## Agent Helpers
 

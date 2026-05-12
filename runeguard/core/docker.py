@@ -16,6 +16,12 @@ CONTAINER_WORKDIR = "/workspace"
 class DockerSandboxConfig:
     image: str = DEFAULT_IMAGE
     workspace: Path = Path.cwd()
+    unsafe_writable_workspace: bool = False
+    readonly_rootfs: bool = True
+    tmpfs_mounts: tuple[str, ...] = (
+        "/tmp:rw,noexec,nosuid,size=64m",
+        "/run:rw,noexec,nosuid,size=16m",
+    )
     network: str = "none"
     memory: str = "512m"
     cpus: str = "1"
@@ -52,6 +58,10 @@ class DockerSandboxRunner:
             {
                 "image": self.config.image,
                 "workspace": str(self.workspace),
+                "unsafe_writable_workspace": self.config.unsafe_writable_workspace,
+                "readonly_rootfs": self.config.readonly_rootfs,
+                "tmpfs_mounts": list(self.config.tmpfs_mounts),
+                "writable_paths": self.policy.writable_paths,
                 "network": self.config.network,
                 "memory": self.config.memory,
                 "cpus": self.config.cpus,
@@ -63,15 +73,13 @@ class DockerSandboxRunner:
         return completed.returncode
 
     def build_docker_argv(self, command_argv: list[str]) -> list[str]:
-        workspace = self.workspace
-        return [
+        docker_argv = [
             "docker",
             "run",
             "--rm",
             "--workdir",
             CONTAINER_WORKDIR,
-            "--mount",
-            f"type=bind,source={workspace},target={CONTAINER_WORKDIR}",
+            *self._mount_args(),
             "--user",
             self.config.user,
             "--network",
@@ -86,13 +94,88 @@ class DockerSandboxRunner:
             "ALL",
             "--security-opt",
             "no-new-privileges",
-            self.config.image,
-            *command_argv,
         ]
+
+        if self.config.readonly_rootfs:
+            docker_argv.append("--read-only")
+
+        for tmpfs_mount in self.config.tmpfs_mounts:
+            docker_argv.extend(["--tmpfs", tmpfs_mount])
+
+        docker_argv.extend([self.config.image, *command_argv])
+        return docker_argv
 
     @property
     def workspace(self) -> Path:
-        return Path(self.config.workspace).resolve(strict=True)
+        workspace = Path(self.config.workspace).expanduser().resolve(strict=True)
+        self._validate_safe_mount_source(workspace, allow_inside_home=True)
+        return workspace
+
+    def _mount_args(self) -> list[str]:
+        workspace = self.workspace
+        mode = "rw" if self.config.unsafe_writable_workspace else "readonly"
+        mounts = [
+            "--mount",
+            f"type=bind,source={workspace},target={CONTAINER_WORKDIR},{mode}",
+        ]
+
+        if self.config.unsafe_writable_workspace:
+            return mounts
+
+        for writable_path in self.policy.writable_paths:
+            source = self._resolve_writable_path(writable_path)
+            target = self._container_target_for(source)
+            mounts.extend(
+                [
+                    "--mount",
+                    f"type=bind,source={source},target={target}",
+                ]
+            )
+
+        return mounts
+
+    def _resolve_writable_path(self, path: str) -> Path:
+        raw_path = Path(os.path.expanduser(path))
+        source = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+        source = source.resolve(strict=True)
+        self._validate_safe_mount_source(source, allow_inside_home=True)
+
+        try:
+            source.relative_to(self.workspace)
+        except ValueError as exc:
+            raise ValueError(f"writable path must be inside workspace: {path}") from exc
+
+        return source
+
+    def _container_target_for(self, source: Path) -> str:
+        relative = source.relative_to(self.workspace)
+        if str(relative) == ".":
+            return CONTAINER_WORKDIR
+        return str(Path(CONTAINER_WORKDIR) / relative)
+
+    def _validate_safe_mount_source(self, source: Path, *, allow_inside_home: bool):
+        home = Path.home().resolve()
+        exact_dangerous_paths = [home, home.parent]
+        dangerous_subtrees = [home / ".ssh", home / ".aws", home / ".config"]
+
+        for dangerous in exact_dangerous_paths:
+            if source == dangerous:
+                raise ValueError(f"refusing dangerous mount source: {source}")
+
+        for dangerous in dangerous_subtrees:
+            if source == dangerous or self._is_relative_to(source, dangerous):
+                raise ValueError(f"refusing dangerous mount source: {source}")
+
+        if not allow_inside_home and self._is_relative_to(source, home):
+            raise ValueError(f"refusing home directory mount source: {source}")
+
+    def _is_relative_to(self, path: Path, parent: Path) -> bool:
+        try:
+            path.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
 
     def _log_event(self, tool_name: str, decision: Decision, kwargs: dict):
         log_decision(
