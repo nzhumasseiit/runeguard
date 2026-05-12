@@ -33,10 +33,20 @@ runeguard check
 runeguard demo
 ```
 
-Run a command through the runtime shell policy:
+Run a command in the Docker sandbox backend:
 
 ```bash
 runeguard run -- python -c "print('hello from guarded command')"
+```
+
+This mounts the current workspace at `/workspace`, runs as a non-root user,
+disables networking by default, drops Linux capabilities, and applies simple
+memory/CPU/process limits.
+
+For local development only, you can still run through the host policy wrapper:
+
+```bash
+runeguard run --backend host -- python -c "print('host policy check only')"
 ```
 
 Evaluate an action without executing it:
@@ -63,7 +73,7 @@ On Linux, build and use the LD_PRELOAD shim:
 
 ```bash
 runeguard shim build
-runeguard run --preload -- python -c "open('.env').read()"
+runeguard run --backend host --preload -- python -c "open('.env').read()"
 ```
 
 On Linux with BCC installed, trace runtime activity:
@@ -94,7 +104,8 @@ Expected output:
 Working now:
 
 - YAML policy loading
-- `runeguard run -- <command>` wrapper
+- `runeguard run -- <command>` Docker sandbox runner
+- optional `runeguard run --backend host -- <command>` policy wrapper
 - `runeguard eval <tool>` dry policy evaluation
 - Unix socket policy daemon
 - Linux LD_PRELOAD shim source and build target
@@ -109,6 +120,9 @@ Working now:
 
 Planned:
 
+- Docker/Podman hardening
+- Landlock filesystem restrictions
+- HTML/JSON audit reports
 - process correlation
 - eBPF-backed enforcement
 - CI/devbox sandbox mode
@@ -133,13 +147,21 @@ RuneGuard is a runtime permission layer for AI agents.
 
 The long-term goal is to create a real boundary between agent intent and system truth: what the model says it will do versus what the system actually observes and allows.
 
-## What RuneGuard Is Not Yet
+## Security Boundary
 
-RuneGuard is not a sandbox replacement yet.
+The policy/proxy modes are not a hard security boundary. They are useful when
+agent tool calls are routed through RuneGuard, but they cannot stop actions that
+avoid those routes.
 
-It does not provide kernel-level enforcement in v1.
+The LD_PRELOAD shim is experimental and bypassable by static binaries, direct
+syscalls, and processes that do not load the shim.
 
-The current version is a policy plus tool-call enforcement prototype with Linux process visibility/interception foundations. The Python proxy controls actions routed through RuneGuard. The LD_PRELOAD shim only affects dynamically linked processes launched with the shim. The eBPF layer is visibility-first, not enforcement yet.
+The Docker sandbox mode is the first step toward stronger enforcement: it gives
+RuneGuard a real process boundary with non-root execution, an isolated container
+filesystem view, network denial by default, and resource limits.
+
+The eBPF layer is currently audit and visibility work. It is not the primary
+enforcement layer yet.
 
 ## Try To Break It
 

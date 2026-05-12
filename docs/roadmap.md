@@ -1,45 +1,34 @@
 # Roadmap
 
-## v1: Breakable Policy Layer
+## v0.1 — Policy Prototype
 
-Goal: give early users a real thing to run, attack, and critique.
+- CLI policy checks
+- demo poisoned README
+- file, shell, and network rules
 
-Included:
+## v0.2 — Sandbox Runner
 
-- policy loading and validation
-- file, shell, and HTTP policy decisions
-- poisoned README demo
-- dry action evaluation with `runeguard eval`
-- Unix socket policy daemon
-- Linux LD_PRELOAD shim for `open`, `openat`, `execve`, and `connect`
-- BCC/eBPF syscall tracer foundation
-- basic agent integration helpers
-- JSONL audit logs
-- explicit threat model and limitations
+- `runeguard run`
+- Docker/Podman backend
+- non-root execution
+- read-only rootfs
+- network deny by default
 
-## Next: Agent Integrations
+## v0.3 — Hardening
 
-Goal: make RuneGuard useful with real coding-agent workflows.
+- custom seccomp profile
+- Landlock filesystem restrictions
+- resource limits
+- better logs
 
-Candidate integrations:
+## v0.4 — Developer Workflow
 
-- MCP server mode
-- GitHub Actions example
-- local devbox example
-- richer framework adapters beyond the initial LangChain/OpenAI-style helpers
+- GitHub Actions/CI mode
+- policy templates
+- HTML/JSON audit reports
 
-## Later: Runtime Verification
+## v0.5 — Advanced Linux Backend
 
-Goal: compare declared tool intent with observed system behavior.
-
-Candidate work:
-
-- process correlation
-- network observation
-- filesystem observation
-- eBPF-based policy verification
-- hard enforcement strategy for Linux beyond LD_PRELOAD
-
-## Not A Goal
-
-RuneGuard should not pretend to be a full sandbox until it has a real isolation boundary. The project should stay honest about that line.
+- eBPF audit
+- optional eBPF LSM experiments
+- AppArmor/SELinux integrations

@@ -12,6 +12,7 @@ from .mcp.proxy import run_proxy
 from .mcp.server import RuneGuardMCPServer
 from .policy import Policy
 from .proxy import RuneGuardProxy
+from .core.docker import DockerSandboxConfig, DockerSandboxRunner, current_user_container_id
 from .core.interceptor import InterceptorConfig, RuneGuardInterceptor
 from .seccomp.runner import run_with_seccomp
 
@@ -38,13 +39,20 @@ def run(
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
     audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
     json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
+    backend: str = typer.Option("docker", help="Execution backend: docker or host."),
+    image: str = typer.Option("python:3.12-slim", help="Docker image for the docker backend."),
+    workspace: Path = typer.Option(Path.cwd(), help="Workspace directory to mount into the sandbox."),
+    memory: str = typer.Option("512m", help="Docker memory limit."),
+    cpus: str = typer.Option("1", help="Docker CPU limit."),
+    pids_limit: int = typer.Option(256, help="Docker process count limit."),
+    network: str = typer.Option("none", help="Docker network mode. Defaults to none."),
     preload: bool = typer.Option(False, help="Run the command with the LD_PRELOAD shim."),
     seccomp: bool = typer.Option(False, help="Apply seccomp-BPF filter before running (Linux only)."),
     socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="RuneGuard daemon socket for the shim."),
     shim_path: Path = typer.Option(Path("runeguard/shim/rg_preload.so"), help="Path to rg_preload.so."),
 ):
     """
-    Run a command through RuneGuard policy checks.
+    Run a command through RuneGuard sandbox or host policy checks.
     """
     if not ctx.args:
         typer.echo("Pass a command after '--'", err=True)
@@ -55,6 +63,39 @@ def run(
     guard = RuneGuardProxy(policy_obj, audit_log=audit_log, json_logs=json_logs)
     command = " ".join(ctx.args)
     env = None
+
+    if backend not in {"docker", "host"}:
+        typer.echo("Backend must be one of: docker, host", err=True)
+        raise typer.Exit(2)
+
+    if backend == "docker":
+        if preload or seccomp:
+            typer.echo("--preload and --seccomp are only supported with --backend host", err=True)
+            raise typer.Exit(2)
+
+        config = DockerSandboxConfig(
+            image=image,
+            workspace=workspace,
+            network=network,
+            memory=memory,
+            cpus=cpus,
+            pids_limit=pids_limit,
+            user=current_user_container_id(),
+        )
+        runner = DockerSandboxRunner(
+            policy_obj,
+            config,
+            audit_log=audit_log,
+            json_logs=json_logs,
+        )
+        try:
+            raise typer.Exit(runner.run(ctx.args))
+        except FileNotFoundError:
+            typer.echo("Docker executable not found. Install Docker or use --backend host.", err=True)
+            raise typer.Exit(127)
+        except PermissionError as exc:
+            typer.echo(f"Blocked: {exc}", err=True)
+            raise typer.Exit(1)
 
     if preload:
         interceptor = RuneGuardInterceptor(

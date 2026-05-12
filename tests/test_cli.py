@@ -26,15 +26,56 @@ def test_run_command_requires_separator_and_command():
     assert "Example: runeguard run -- python examples/fake_agent/agent.py" in output
 
 
-def test_run_command_allows_safe_subprocess():
-    result = runner.invoke(app, ["run", "--", "python3", "-c", "print('guarded')"])
+def test_run_command_allows_safe_subprocess_with_host_backend():
+    result = runner.invoke(app, ["run", "--backend", "host", "--", "python3", "-c", "print('guarded')"])
     assert result.exit_code == 0
 
 
 def test_run_command_blocks_dangerous_subprocess():
-    result = runner.invoke(app, ["run", "--", "rm", "-rf", "./project"])
+    result = runner.invoke(app, ["run", "--backend", "host", "--", "rm", "-rf", "./project"])
     assert result.exit_code != 0
     assert "blocked shell command pattern: rm -rf" in result.stdout
+
+
+def test_run_command_uses_docker_backend_by_default(monkeypatch):
+    calls = []
+
+    def fake_run(argv, check):
+        calls.append((argv, check))
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("runeguard.core.docker.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["run", "--", "python", "-c", "print('guarded')"])
+
+    assert result.exit_code == 0
+    assert calls
+    assert calls[0][0][0:2] == ["docker", "run"]
+    assert "--network" in calls[0][0]
+    assert calls[0][0][calls[0][0].index("--network") + 1] == "none"
+
+
+def test_run_command_reports_missing_docker(monkeypatch):
+    def fake_run(argv, check):
+        raise FileNotFoundError
+
+    monkeypatch.setattr("runeguard.core.docker.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["run", "--", "python", "-c", "print('guarded')"])
+
+    assert result.exit_code == 127
+    output = result.stdout + result.stderr
+    assert "Docker executable not found" in output
+
+
+def test_run_command_rejects_preload_with_docker_backend():
+    result = runner.invoke(app, ["run", "--preload", "--", "python", "-c", "print('guarded')"])
+
+    assert result.exit_code == 2
+    output = result.stdout + result.stderr
+    assert "only supported with --backend host" in output
 
 
 def test_eval_command_reports_block():

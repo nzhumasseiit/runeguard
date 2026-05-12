@@ -1,6 +1,7 @@
 # Threat Model
 
-RuneGuard v1 focuses on policy decisions around actions an AI coding agent asks to perform, plus Linux process interception and visibility foundations.
+RuneGuard focuses on policy decisions around actions an AI coding agent asks to
+perform, plus an initial Docker sandbox backend for stronger process isolation.
 
 ## Assets
 
@@ -26,16 +27,19 @@ Examples:
 - deciding whether a requested file action should be allowed
 - deciding whether a requested shell command should be allowed
 - deciding whether a requested HTTP action targets an allowed domain
-- enforcing selected Linux libc calls through an LD_PRELOAD shim when a process is launched with `runeguard run --preload`
+- running commands in a Docker container with non-root execution
+- denying network access by default in Docker sandbox mode
+- applying simple Docker memory, CPU, and process limits
+- enforcing selected Linux libc calls through an LD_PRELOAD shim when a process is launched with `runeguard run --backend host --preload`
 - observing selected Linux syscalls with BCC/eBPF
 - logging every allow/block decision in human-readable output and optional JSONL audit logs
 - making bypass attempts easy to reproduce with `runeguard eval`
 
 ## Out Of Scope For v1
 
-- kernel-level sandboxing
-- stopping actions that do not go through RuneGuard, the shim, or a future enforcement layer
-- full process tree isolation
+- kernel-level sandboxing outside Docker's configured isolation
+- stopping actions that do not go through RuneGuard, Docker sandbox mode, the shim, or a future enforcement layer
+- complete process tree isolation outside the selected backend
 - network packet enforcement or firewalling
 - preventing LD_PRELOAD bypasses such as static binaries, direct syscalls, or privileged runtime changes
 - malicious local users
@@ -43,6 +47,11 @@ Examples:
 
 ## Security Claim
 
-RuneGuard v1 is a policy enforcement layer for routed tool calls, with an experimental Linux LD_PRELOAD shim for child-process interception.
+RuneGuard has policy/proxy modes for routed tool calls and a Docker sandbox mode
+as the first stronger enforcement backend.
 
-It is not a sandbox. If an agent can directly access the filesystem, shell, or network through another path that avoids the proxy and shim, RuneGuard cannot reliably stop that action yet. The eBPF layer is currently for visibility and future verification, not enforcement.
+Policy/proxy mode alone is not a hard security boundary. The LD_PRELOAD shim is
+experimental and bypassable. Docker sandbox mode provides a real process
+boundary, but it should still be treated as an early sandbox backend. The eBPF
+layer is currently for visibility and future verification, not primary
+enforcement.

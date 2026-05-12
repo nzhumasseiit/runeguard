@@ -70,16 +70,34 @@ Limitations:
 
 ## CLI
 
-The CLI exposes the policy layer for testers:
+The CLI exposes the policy and sandbox layers for testers:
 
 - `runeguard check` loads and prints a policy summary
 - `runeguard demo` runs the poisoned README scenario
 - `runeguard eval` evaluates one action without executing it
-- `runeguard run -- <command>` gates a subprocess through shell policy
-- `runeguard run --preload -- <command>` launches a command with the shim
+- `runeguard run -- <command>` runs a command in the Docker sandbox backend
+- `runeguard run --backend host -- <command>` gates a host subprocess through shell policy
+- `runeguard run --backend host --preload -- <command>` launches a host command with the shim
 - `runeguard daemon start` starts the policy daemon
 - `runeguard shim build` builds the Linux shim
 - `runeguard ebpf trace` starts BCC/eBPF syscall tracing
+
+## Docker Sandbox
+
+`runeguard.core.docker.DockerSandboxRunner` is the first serious sandbox backend.
+
+Default behavior:
+
+- bind-mounts only the selected workspace at `/workspace`
+- runs with the caller's uid/gid when possible
+- disables networking with `--network none`
+- applies memory, CPU, and process limits
+- drops Linux capabilities
+- sets `no-new-privileges`
+
+The Docker backend avoids mounting user home directories and common secret
+locations such as `~/.ssh`, `~/.aws`, and `~/.config` unless they are inside the
+explicit workspace path.
 
 ## Agent Helpers
 
@@ -107,4 +125,7 @@ The v1 eBPF layer is visibility-first. It prints structured events and is intend
 
 ## Security Boundary
 
-The strongest v1 boundary is still routed tool-call enforcement through `RuneGuardProxy`. The shim expands coverage for Linux child processes but is not a complete sandbox. The eBPF layer observes behavior but does not enforce policy yet.
+Policy/proxy mode is not a hard security boundary because it only controls
+actions routed through RuneGuard. The LD_PRELOAD shim is experimental and
+bypassable. Docker sandbox mode is the first step toward stronger enforcement.
+The eBPF layer observes behavior but does not enforce policy yet.
