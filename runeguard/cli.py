@@ -8,18 +8,23 @@ from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
 from .ebpf import EbpfTracer
 from .logger import decision_record
+from .mcp.proxy import run_proxy
+from .mcp.server import RuneGuardMCPServer
 from .policy import Policy
 from .proxy import RuneGuardProxy
 from .core.interceptor import InterceptorConfig, RuneGuardInterceptor
+from .seccomp.runner import run_with_seccomp
 
 app = typer.Typer(help="RuneGuard: runtime enforcement for AI agents.")
 daemon_app = typer.Typer(help="Manage the RuneGuard policy daemon.")
 shim_app = typer.Typer(help="Build and inspect the LD_PRELOAD shim.")
 ebpf_app = typer.Typer(help="Run Linux eBPF tracing.")
+mcp_app = typer.Typer(help="MCP proxy and server commands.")
 
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(shim_app, name="shim")
 app.add_typer(ebpf_app, name="ebpf")
+app.add_typer(mcp_app, name="mcp")
 
 
 @app.command(
@@ -34,6 +39,7 @@ def run(
     audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
     json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
     preload: bool = typer.Option(False, help="Run the command with the LD_PRELOAD shim."),
+    seccomp: bool = typer.Option(False, help="Apply seccomp-BPF filter before running (Linux only)."),
     socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="RuneGuard daemon socket for the shim."),
     shim_path: Path = typer.Option(Path("runeguard/shim/rg_preload.so"), help="Path to rg_preload.so."),
 ):
@@ -59,6 +65,24 @@ def run(
             )
         )
         env = interceptor.env()
+
+    if seccomp:
+        if platform.system() != "Linux":
+            typer.echo("--seccomp is Linux only", err=True)
+            raise typer.Exit(2)
+
+        decision = policy_obj.decide("shell", command=command, argv=ctx.args)
+        if decision.type.value != "ALLOW":
+            typer.echo(f"Blocked: {decision.reason}", err=True)
+            raise typer.Exit(1)
+
+        try:
+            exit_code = run_with_seccomp(ctx.args, policy_obj, env=env)
+        except RuntimeError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2)
+
+        raise typer.Exit(exit_code)
 
     try:
         result = guard.call(
@@ -201,6 +225,43 @@ def ebpf_trace():
     Trace execve, openat, and connect syscalls with BCC/eBPF.
     """
     EbpfTracer().start()
+
+
+@mcp_app.command(
+    "proxy",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def mcp_proxy(
+    ctx: typer.Context,
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    audit_log: str | None = typer.Option(None, help="Append decisions to this JSONL file."),
+    json_logs: bool = typer.Option(False, help="Print decisions as JSON lines."),
+):
+    """
+    Run RuneGuard as a transparent MCP proxy in front of an upstream MCP server.
+    """
+    if not ctx.args:
+        typer.echo("Pass the upstream MCP server command after '--'", err=True)
+        typer.echo(
+            "Example: runeguard mcp proxy -- npx @modelcontextprotocol/server-filesystem /workspace",
+            err=True,
+        )
+        raise typer.Exit(2)
+
+    loaded = Policy.from_file(policy)
+    run_proxy(loaded, ctx.args, audit_log=audit_log, json_logs=json_logs)
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    audit_log: str | None = typer.Option(None, help="Append decisions to this JSONL file."),
+):
+    """
+    Run RuneGuard as a standalone MCP server with policy-checked tools.
+    """
+    loaded = Policy.from_file(policy)
+    RuneGuardMCPServer(loaded, audit_log=audit_log).serve()
 
 
 def _run_subprocess(command: str, argv: list[str], env: dict[str, str] | None = None) -> int:

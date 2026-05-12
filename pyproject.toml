@@ -18,6 +18,7 @@ dependencies = [
 runeguard = "runeguard.cli:app"
 runeguard-daemon = "runeguard.daemon:main"
 runeguard-ebpf = "runeguard.ebpf.loader:main"
+runeguard-mcp = "runeguard.mcp.server:main"
 
 [tool.setuptools.packages.find]
 include = ["runeguard*"]
@@ -26,7 +27,9 @@ include = ["runeguard*"]
 runeguard = [
     "shim/preload.c",
     "shim/Makefile",
-    "ebpf/probes/*.c"
+    "ebpf/probes/*.c",
+    "seccomp/*.py",
+    "mcp/*.py"
 ]
 
 [tool.pytest.ini_options]
