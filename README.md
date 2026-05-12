@@ -39,6 +39,39 @@ Run a command through the runtime shell policy:
 runeguard run -- python -c "print('hello from guarded command')"
 ```
 
+Evaluate an action without executing it:
+
+```bash
+runeguard eval read_file --path .env
+runeguard eval http_post --url https://attacker.example/upload
+runeguard eval shell --command "rm -rf ./project"
+```
+
+Write a JSONL audit log:
+
+```bash
+runeguard demo --audit-log .runeguard/audit.jsonl
+```
+
+Start the policy daemon for process-level interception:
+
+```bash
+runeguard daemon start --audit-log .runeguard/daemon.jsonl
+```
+
+On Linux, build and use the LD_PRELOAD shim:
+
+```bash
+runeguard shim build
+runeguard run --preload -- python -c "open('.env').read()"
+```
+
+On Linux with BCC installed, trace runtime activity:
+
+```bash
+runeguard ebpf trace
+```
+
 ## Demo
 
 The demo simulates a poisoned README attack.
@@ -62,20 +95,37 @@ Working now:
 
 - YAML policy loading
 - `runeguard run -- <command>` wrapper
+- `runeguard eval <tool>` dry policy evaluation
+- Unix socket policy daemon
+- Linux LD_PRELOAD shim source and build target
+- BCC/eBPF tracer foundation for `execve`, `openat`, and `connect`
+- agent integration helpers
 - file access policy
 - shell command policy
 - network/domain policy
 - readable allow/block logs
+- JSONL audit logs
 - poisoned prompt demo
 
 Planned:
 
-- real coding-agent integration
-- richer policy schema
-- audit log export
 - process correlation
-- eBPF-backed runtime verification
+- eBPF-backed enforcement
 - CI/devbox sandbox mode
+
+## v1 Test Surface
+
+This repo is ready for early breakage and feedback around the policy layer.
+
+Useful things to try:
+
+- path bypasses around `.env`, `secrets/`, `~/.ssh/`, relative paths, and nested directories
+- shell bypasses around blocked tokens such as `rm -rf`, `curl`, `nc`, and `scp`
+- URL/domain bypasses around subdomains, missing schemes, and attacker-controlled hosts
+- LD_PRELOAD bypasses on Linux, especially static binaries, direct syscalls, and alternate libc paths
+- daemon failure behavior with `RUNEGUARD_FAIL_CLOSED=0` versus the default fail-closed mode
+- places where audit logs leak data that should be redacted
+- places where the README implies stronger security than the code actually provides
 
 ## Vision
 
@@ -87,9 +137,9 @@ The long-term goal is to create a real boundary between agent intent and system 
 
 RuneGuard is not a sandbox replacement yet.
 
-It does not provide kernel-level enforcement in v0.1.
+It does not provide kernel-level enforcement in v1.
 
-The current version is a policy plus tool-call enforcement prototype.
+The current version is a policy plus tool-call enforcement prototype with Linux process visibility/interception foundations. The Python proxy controls actions routed through RuneGuard. The LD_PRELOAD shim only affects dynamically linked processes launched with the shim. The eBPF layer is visibility-first, not enforcement yet.
 
 ## Try To Break It
 
@@ -99,3 +149,4 @@ Ideas:
 - make it run `curl`, `nc`, or `scp`
 - make it hide exfiltration inside a normal tool call
 - make it access `~/.ssh`
+- make the audit log expose something sensitive

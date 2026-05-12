@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "runeguard"
-version = "0.1.0"
+version = "1.0.0"
 description = "Runtime enforcement layer for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,9 +16,18 @@ dependencies = [
 
 [project.scripts]
 runeguard = "runeguard.cli:app"
+runeguard-daemon = "runeguard.daemon:main"
+runeguard-ebpf = "runeguard.ebpf.loader:main"
 
 [tool.setuptools.packages.find]
 include = ["runeguard*"]
+
+[tool.setuptools.package-data]
+runeguard = [
+    "shim/preload.c",
+    "shim/Makefile",
+    "ebpf/probes/*.c"
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

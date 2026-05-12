@@ -3,12 +3,22 @@ from .logger import log_decision
 
 
 class RuneGuardProxy:
-    def __init__(self, policy):
+    def __init__(self, policy, *, audit_log=None, json_logs: bool = False, quiet: bool = False):
         self.policy = policy
+        self.audit_log = audit_log
+        self.json_logs = json_logs
+        self.quiet = quiet
 
     def call(self, tool_name: str, fn, **kwargs):
         decision = self.policy.decide(tool_name, **kwargs)
-        log_decision(tool_name, decision, kwargs)
+        log_decision(
+            tool_name,
+            decision,
+            kwargs,
+            audit_log=self.audit_log,
+            json_logs=self.json_logs,
+            quiet=self.quiet,
+        )
 
         if decision.type == DecisionType.BLOCK:
             raise PermissionError(decision.reason)

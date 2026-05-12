@@ -1,12 +1,25 @@
+import platform
 import subprocess
+from pathlib import Path
 
 import typer
 
+from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
+from .ebpf import EbpfTracer
+from .logger import decision_record
 from .policy import Policy
 from .proxy import RuneGuardProxy
+from .core.interceptor import InterceptorConfig, RuneGuardInterceptor
 
 app = typer.Typer(help="RuneGuard: runtime enforcement for AI agents.")
+daemon_app = typer.Typer(help="Manage the RuneGuard policy daemon.")
+shim_app = typer.Typer(help="Build and inspect the LD_PRELOAD shim.")
+ebpf_app = typer.Typer(help="Run Linux eBPF tracing.")
+
+app.add_typer(daemon_app, name="daemon")
+app.add_typer(shim_app, name="shim")
+app.add_typer(ebpf_app, name="ebpf")
 
 
 @app.command(
@@ -18,6 +31,11 @@ app = typer.Typer(help="RuneGuard: runtime enforcement for AI agents.")
 def run(
     ctx: typer.Context,
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
+    json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
+    preload: bool = typer.Option(False, help="Run the command with the LD_PRELOAD shim."),
+    socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="RuneGuard daemon socket for the shim."),
+    shim_path: Path = typer.Option(Path("runeguard/shim/rg_preload.so"), help="Path to rg_preload.so."),
 ):
     """
     Run a command through RuneGuard policy checks.
@@ -28,13 +46,24 @@ def run(
         raise typer.Exit(2)
 
     policy_obj = Policy.from_file(policy)
-    guard = RuneGuardProxy(policy_obj)
+    guard = RuneGuardProxy(policy_obj, audit_log=audit_log, json_logs=json_logs)
     command = " ".join(ctx.args)
+    env = None
+
+    if preload:
+        interceptor = RuneGuardInterceptor(
+            InterceptorConfig(
+                shim_path=shim_path,
+                socket_path=socket_path,
+                policy_path=policy,
+            )
+        )
+        env = interceptor.env()
 
     try:
         result = guard.call(
             "shell",
-            _run_subprocess,
+            lambda command, argv: _run_subprocess(command, argv, env=env),
             command=command,
             argv=ctx.args,
         )
@@ -46,26 +75,136 @@ def run(
 
 
 @app.command()
-def demo(policy: str = "policies/default.yaml"):
+def demo(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
+    json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
+):
     """
     Run the local poisoned-prompt demo.
     """
-    run_demo(policy)
+    run_demo(policy, audit_log=audit_log, json_logs=json_logs)
 
 
 @app.command()
-def check(policy: str = "policies/default.yaml"):
+def check(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    json_output: bool = typer.Option(False, "--json", help="Print policy summary as JSON."),
+):
     """
     Check that a policy file can be loaded.
     """
     loaded = Policy.from_file(policy)
+    if json_output:
+        import json
+
+        typer.echo(json.dumps(loaded.summary(), sort_keys=True))
+        return
+
     typer.echo(f"Policy loaded: {policy}")
     typer.echo(f"Protected paths: {loaded.protected_paths}")
     typer.echo(f"Allowed domains: {loaded.allowed_domains}")
 
 
-def _run_subprocess(command: str, argv: list[str]) -> int:
-    completed = subprocess.run(argv, check=False)
+@app.command("eval")
+def evaluate(
+    tool_name: str = typer.Argument(..., help="Tool/action name, for example read_file, shell, or http_post."),
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    path: str | None = typer.Option(None, help="Path argument for file tools."),
+    command: str | None = typer.Option(None, help="Command string for shell tools."),
+    url: str | None = typer.Option(None, help="URL argument for HTTP tools."),
+    json_output: bool = typer.Option(False, "--json", help="Print the decision as JSON."),
+):
+    """
+    Evaluate one action against policy without executing it.
+    """
+    loaded = Policy.from_file(policy)
+    kwargs = {}
+
+    if path is not None:
+        kwargs["path"] = path
+
+    if command is not None:
+        kwargs["command"] = command
+
+    if url is not None:
+        kwargs["url"] = url
+
+    decision = loaded.decide(tool_name, **kwargs)
+
+    if json_output:
+        import json
+
+        typer.echo(json.dumps(decision_record(tool_name, decision, kwargs), sort_keys=True))
+        return
+
+    typer.echo(f"{decision.type.value}: {decision.reason}")
+
+
+@daemon_app.command("start")
+def daemon_start(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="Unix socket path."),
+    audit_log: str | None = typer.Option(None, help="Append decisions to this JSONL file."),
+    json_logs: bool = typer.Option(False, help="Print decisions as JSON lines."),
+):
+    """
+    Start the RuneGuard policy daemon for shim IPC.
+    """
+    daemon = RuneGuardDaemon(
+        policy_path=policy,
+        socket_path=socket_path,
+        audit_log=audit_log,
+        json_logs=json_logs,
+    )
+    daemon.start()
+
+
+@daemon_app.command("status")
+def daemon_status(socket_path: str = typer.Option(DEFAULT_SOCKET_PATH, help="Unix socket path.")):
+    """
+    Check whether the daemon socket exists.
+    """
+    if Path(socket_path).exists():
+        typer.echo(f"RuneGuard daemon socket found: {socket_path}")
+        return
+
+    typer.echo(f"RuneGuard daemon socket not found: {socket_path}")
+    raise typer.Exit(1)
+
+
+@shim_app.command("build")
+def shim_build():
+    """
+    Build the Linux LD_PRELOAD shim.
+    """
+    if platform.system() != "Linux":
+        typer.echo("LD_PRELOAD shim builds are supported on Linux only.", err=True)
+        raise typer.Exit(2)
+
+    shim_dir = Path(__file__).resolve().parent / "shim"
+    result = subprocess.run(["make"], cwd=shim_dir, check=False)
+    raise typer.Exit(result.returncode)
+
+
+@shim_app.command("path")
+def shim_path():
+    """
+    Print the expected shim .so path.
+    """
+    typer.echo(Path(__file__).resolve().parent / "shim" / "rg_preload.so")
+
+
+@ebpf_app.command("trace")
+def ebpf_trace():
+    """
+    Trace execve, openat, and connect syscalls with BCC/eBPF.
+    """
+    EbpfTracer().start()
+
+
+def _run_subprocess(command: str, argv: list[str], env: dict[str, str] | None = None) -> int:
+    completed = subprocess.run(argv, check=False, env=env)
     return completed.returncode
 
 

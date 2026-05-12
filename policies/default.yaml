@@ -1,12 +1,16 @@
+# Paths are matched after expansion/normalization. A trailing slash means
+# "this directory name and anything below it".
 protected_paths:
   - ".env"
   - "secrets/"
   - "~/.ssh/"
 
+# Exact domains are allowed. Wildcards such as "*.example.com" are also valid.
 allowed_domains:
   - "localhost"
   - "api.openai.com"
 
+# Shell patterns are token matched, not raw substring matched.
 blocked_commands:
   - "rm -rf"
   - "curl"
@@ -16,3 +20,13 @@ blocked_commands:
 require_approval:
   - "send_email"
   - "external_http_post"
+
+allowed_env_vars:
+  - "PATH"
+  - "HOME"
+  - "LANG"
+  - "LC_ALL"
+  - "RUNEGUARD_SOCKET"
+  - "RUNEGUARD_POLICY"
+
+max_file_size_mb: 10
