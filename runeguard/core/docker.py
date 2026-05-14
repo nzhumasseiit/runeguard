@@ -173,7 +173,12 @@ class DockerSandboxRunner:
 
     def _copy_filtered_workspace(self, destination: Path):
         workspace = self.workspace
+        destination = destination.resolve(strict=False)
         for source in workspace.rglob("*"):
+            source_resolved = source.resolve(strict=False)
+            if source_resolved == destination or self._is_relative_to(source_resolved, destination):
+                continue
+
             relative = source.relative_to(workspace)
             relative_text = str(relative).replace(os.sep, "/")
 
@@ -190,6 +195,28 @@ class DockerSandboxRunner:
 
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+
+        self._create_writable_mount_targets(destination)
+
+    def _create_writable_mount_targets(self, destination: Path):
+        for writable_path in self.policy.writable_paths:
+            raw_path = Path(os.path.expanduser(writable_path))
+            if raw_path.is_absolute():
+                try:
+                    relative = raw_path.resolve(strict=False).relative_to(self.workspace)
+                except ValueError:
+                    continue
+            else:
+                relative = raw_path
+
+            relative_text = str(relative).replace(os.sep, "/").lstrip("./")
+            if not relative_text or relative_text == ".":
+                continue
+
+            if self.policy.is_denied_workspace_path(relative_text):
+                continue
+
+            (destination / relative).mkdir(parents=True, exist_ok=True)
 
     def _resolve_writable_path(self, path: str) -> Path:
         raw_path = Path(os.path.expanduser(path))

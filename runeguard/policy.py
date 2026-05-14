@@ -178,16 +178,21 @@ class Policy:
         return False
 
     def is_denied_workspace_path(self, path: str) -> bool:
-        normalized = str(Path(os.path.expanduser(path))).replace(os.sep, "/").lstrip("./")
+        normalized = self._strip_current_dir(str(Path(os.path.expanduser(path))).replace(os.sep, "/"))
         candidates = {normalized, Path(normalized).name}
 
         for pattern in self.protected_paths:
-            normalized_pattern = pattern.replace(os.sep, "/").lstrip("./")
+            normalized_pattern = self._strip_current_dir(pattern.replace(os.sep, "/"))
+            home_relative = False
             if normalized_pattern.startswith("~/"):
-                continue
+                home_relative = True
+                normalized_pattern = normalized_pattern[2:]
 
             if normalized_pattern.endswith("/"):
                 normalized_pattern = f"{normalized_pattern}**"
+
+            if home_relative and self._matches_secret_subtree(normalized, normalized_pattern):
+                return True
 
             for candidate in candidates:
                 if fnmatch(candidate, normalized_pattern):
@@ -200,12 +205,19 @@ class Policy:
 
         return False
 
+    def _matches_secret_subtree(self, candidate: str, pattern: str) -> bool:
+        if not pattern.endswith("/**"):
+            return False
+
+        prefix = pattern[:-3].rstrip("/")
+        return candidate == prefix or candidate.startswith(f"{prefix}/") or f"/{prefix}/" in candidate
+
     def is_allowed_workspace_path(self, path: str) -> bool:
         if not self.allowed_paths:
             return True
 
-        normalized = str(Path(path)).replace(os.sep, "/").lstrip("./")
-        return any(fnmatch(normalized, pattern.lstrip("./")) for pattern in self.allowed_paths)
+        normalized = self._strip_current_dir(str(Path(path)).replace(os.sep, "/"))
+        return any(fnmatch(normalized, self._strip_current_dir(pattern)) for pattern in self.allowed_paths)
 
     def _is_allowed_domain(self, domain: str) -> bool:
         domain = domain.lower().rstrip(".")
@@ -252,6 +264,11 @@ class Policy:
 
     def _normalize_path(self, value: str) -> Path:
         return Path(os.path.expanduser(value)).resolve(strict=False)
+
+    def _strip_current_dir(self, value: str) -> str:
+        if value == ".":
+            return value
+        return value[2:] if value.startswith("./") else value
 
     def _path_contains_directory(self, parts: tuple[str, ...], directory_name: str) -> bool:
         return directory_name in parts[:-1]
@@ -332,12 +349,12 @@ def normalize_policy_mapping(data: dict) -> dict:
     ):
         return data
 
-    sandbox = data.get("sandbox", {}) or {}
-    policy_backend = data.get("policy", {}) or {}
-    files = data.get("files", {}) or {}
-    network = data.get("network", {}) or {}
-    shell = data.get("shell", {}) or {}
-    opa = data.get("opa", {}) or {}
+    sandbox = _section(data, "sandbox")
+    policy_backend = _section(data, "policy")
+    files = _section(data, "files")
+    network = _section(data, "network")
+    shell = _section(data, "shell")
+    opa = _section(data, "opa")
 
     return {
         "version": data.get("version", 1),
@@ -359,3 +376,8 @@ def normalize_policy_mapping(data: dict) -> dict:
         "opa_query": opa.get("query", data.get("opa_query", "data.runeguard.allow")),
         "opa_command": opa.get("command", data.get("opa_command", "opa")),
     }
+
+
+def _section(data: dict, key: str) -> dict:
+    value = data.get(key, {})
+    return value if isinstance(value, dict) else {}

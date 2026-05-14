@@ -80,6 +80,20 @@ def test_docker_argv_mounts_policy_writable_paths_separately(tmp_path):
     assert f"type=bind,source={output_dir.resolve()},target=/workspace/out" in argv
 
 
+def test_filtered_workspace_includes_writable_mount_targets(tmp_path):
+    runner = DockerSandboxRunner(
+        Policy({"writable_paths": ["tmp/", ".cache/"]}),
+        DockerSandboxConfig(workspace=tmp_path),
+    )
+    destination = tmp_path / "filtered"
+    destination.mkdir()
+
+    runner._copy_filtered_workspace(destination)
+
+    assert (destination / "tmp").is_dir()
+    assert (destination / ".cache").is_dir()
+
+
 def test_unsafe_writable_workspace_preserves_old_writable_mount(tmp_path):
     runner = DockerSandboxRunner(
         Policy({"writable_paths": ["out"]}),
