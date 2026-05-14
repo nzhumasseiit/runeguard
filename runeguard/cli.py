@@ -9,7 +9,7 @@ import typer
 from .audit import render_summary_html, render_summary_text, summarize_audit_log
 from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
-from .ebpf import EbpfTracer
+from .ebpf import EbpfConfig, EbpfTracer
 from .logger import decision_record
 from .mcp.proxy import run_proxy
 from .mcp.server import RuneGuardMCPServer
@@ -17,6 +17,7 @@ from .policy import Policy
 from .proxy import RuneGuardProxy
 from .core.docker import DockerSandboxConfig, DockerSandboxRunner, current_user_container_id
 from .core.interceptor import InterceptorConfig, RuneGuardInterceptor
+from .core.landlock import LandlockConfig, LandlockSandboxRunner, LandlockUnavailable, landlock_available
 from .seccomp.runner import run_with_seccomp
 
 app = typer.Typer(help="RuneGuard: runtime enforcement for AI agents.")
@@ -38,8 +39,12 @@ app.add_typer(examples_app, name="examples")
 INIT_POLICY = """# RuneGuard policy schema v0.1. Keep version: 1 stable.
 version: 1
 
+policy:
+  backend: yaml
+
 sandbox:
   backend: docker
+  fs_enforcement: none
   network: deny
   readonly_rootfs: true
   readonly_workspace: true
@@ -101,7 +106,11 @@ def run(
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
     audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
     json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
-    backend: str | None = typer.Option(None, help="Execution backend: docker or host."),
+    backend: str | None = typer.Option(None, help="Execution backend: docker, landlock, or host."),
+    allow_weak_fallback: bool = typer.Option(
+        False,
+        help="Allow policy-only fallback if an optional enforcement layer is unavailable.",
+    ),
     image: str = typer.Option("python:3.12-slim", help="Docker image for the docker backend."),
     workspace: Path = typer.Option(Path.cwd(), help="Workspace directory to mount into the sandbox."),
     unsafe_writable_workspace: bool = typer.Option(
@@ -133,8 +142,8 @@ def run(
     command = " ".join(ctx.args)
     env = None
 
-    if backend not in {"docker", "host"}:
-        typer.echo("Backend must be one of: docker, host. Fix: use --backend docker or --backend host.", err=True)
+    if backend not in {"docker", "landlock", "host"}:
+        typer.echo("Backend must be one of: docker, landlock, host. Fix: use --backend docker, --backend landlock, or --backend host.", err=True)
         raise typer.Exit(2)
 
     if backend == "docker":
@@ -159,6 +168,12 @@ def run(
             audit_log=audit_log,
             json_logs=json_logs,
         )
+        if policy_obj.fs_enforcement == "landlock" and not landlock_available():
+            if not allow_weak_fallback:
+                typer.echo("Policy requests sandbox.fs_enforcement=landlock, but Landlock is unavailable. Security mode is fail-closed. Fix: run on Linux with Landlock, remove fs_enforcement, or pass --allow-weak-fallback.", err=True)
+                raise typer.Exit(2)
+            typer.echo("Warning: Landlock unavailable; continuing because --allow-weak-fallback was set.", err=True)
+
         try:
             raise typer.Exit(runner.run(ctx.args))
         except FileNotFoundError:
@@ -170,6 +185,24 @@ def run(
         except ValueError as exc:
             typer.echo(f"Invalid sandbox configuration: {exc}. Fix: run `runeguard doctor` and update runeguard.yaml.", err=True)
             raise typer.Exit(2)
+
+    if backend == "landlock":
+        if preload or seccomp:
+            typer.echo("--preload and --seccomp are only supported with --backend host. Fix: remove those flags or use --backend host.", err=True)
+            raise typer.Exit(2)
+
+        runner = LandlockSandboxRunner(
+            policy_obj,
+            LandlockConfig(workspace=workspace, allow_weak_fallback=allow_weak_fallback),
+        )
+        try:
+            raise typer.Exit(runner.run(ctx.args))
+        except LandlockUnavailable as exc:
+            typer.echo(f"{exc} Security mode is fail-closed. Fix: use Docker backend or pass --allow-weak-fallback for policy-only execution.", err=True)
+            raise typer.Exit(2)
+        except PermissionError as exc:
+            typer.echo(f"Blocked: {exc}. Fix: adjust policy or use a safer command.", err=True)
+            raise typer.Exit(1)
 
     if preload:
         interceptor = RuneGuardInterceptor(
@@ -256,21 +289,24 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
         checks.append(("fail", "Docker executable not found. Fix: install Docker or Docker Desktop."))
         critical_failures += 1
 
-    if docker_path and _docker_daemon_reachable():
-        checks.append(("ok", "Docker daemon reachable"))
+    docker_available = bool(docker_path and _docker_daemon_reachable())
+    if docker_available:
+        checks.append(("ok", "Docker: available"))
     else:
-        checks.append(("fail", "Docker daemon not reachable. Fix: start Docker Desktop or the Docker daemon."))
+        checks.append(("fail", "Docker: unavailable. Fix: install/start Docker or use --backend landlock on Linux."))
         critical_failures += 1
 
     os_name = platform.system() or "unknown"
     checks.append(("info", f"OS: {os_name}"))
 
     if os_name == "Linux":
-        checks.append(("ok" if _linux_seccomp_likely_available() else "warn", "Linux seccomp likely available"))
-        checks.append(("ok" if _linux_landlock_likely_available() else "warn", "Linux Landlock likely available"))
+        checks.append(("ok" if _linux_seccomp_likely_available() else "warn", "Seccomp: available" if _linux_seccomp_likely_available() else "Seccomp: unavailable"))
+        checks.append(("ok" if landlock_available() else "warn", "Landlock: available" if landlock_available() else "Landlock: unavailable"))
+        checks.append(("ok" if _linux_ebpf_likely_available() else "warn", "eBPF: available" if _linux_ebpf_likely_available() else "eBPF: unavailable"))
     else:
-        checks.append(("warn", "seccomp is Linux-only"))
-        checks.append(("warn", "Landlock is Linux-only"))
+        checks.append(("warn", "Seccomp: unavailable on this OS"))
+        checks.append(("warn", "Landlock: unavailable on this OS"))
+        checks.append(("warn", "eBPF: unavailable on this OS"))
 
     policy_path = Path(policy)
     if policy_path.exists():
@@ -281,6 +317,8 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
             critical_failures += 1
         else:
             checks.append(("ok", f"Policy file exists and is valid: {policy}"))
+            checks.append(("info", f"Default backend: {loaded_policy.sandbox_backend}"))
+            checks.append(("info", "Security mode: fail-closed"))
             for writable_path in loaded_policy.writable_paths:
                 candidate = Path(writable_path)
                 if not candidate.is_absolute():
@@ -291,6 +329,8 @@ def doctor(policy: str = typer.Option("runeguard.yaml", help="Policy file to che
                     checks.append(("warn", f"Writable path does not exist yet: {writable_path}. Fix: create it or remove it from policy."))
     elif policy == "runeguard.yaml" and Path("policies/default.yaml").exists():
         checks.append(("ok", "Default policy file exists: policies/default.yaml"))
+        checks.append(("info", "Default backend: docker"))
+        checks.append(("info", "Security mode: fail-closed"))
     else:
         checks.append(("fail", f"Policy file not found: {policy}. Fix: run `runeguard init` or pass --policy policies/default.yaml."))
         critical_failures += 1
@@ -479,11 +519,25 @@ def shim_path():
 
 
 @ebpf_app.command("trace")
-def ebpf_trace():
+def ebpf_trace(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    loader_path: Path | None = typer.Option(None, help="Path to runeguard-ebpf-loader."),
+):
     """
-    Trace execve, openat, and connect syscalls with BCC/eBPF.
+    Trace execve, openat, and connect syscalls with libbpf/CO-RE eBPF.
     """
-    EbpfTracer().start()
+    raise typer.Exit(EbpfTracer(EbpfConfig(mode="trace", policy=policy, loader_path=loader_path)).start())
+
+
+@ebpf_app.command("enforce")
+def ebpf_enforce(
+    policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    loader_path: Path | None = typer.Option(None, help="Path to runeguard-ebpf-loader."),
+):
+    """
+    Start the libbpf/CO-RE eBPF loader in enforcement mode.
+    """
+    raise typer.Exit(EbpfTracer(EbpfConfig(mode="enforce", policy=policy, loader_path=loader_path)).start())
 
 
 @mcp_app.command(
@@ -560,6 +614,13 @@ def _linux_landlock_likely_available() -> bool:
         return False
 
     return Path("/proc/self/attr/landlock").exists() or Path("/sys/kernel/security/landlock").exists()
+
+
+def _linux_ebpf_likely_available() -> bool:
+    if platform.system() != "Linux":
+        return False
+
+    return Path("/sys/kernel/btf/vmlinux").exists() or Path("/sys/fs/bpf").exists()
 
 
 if __name__ == "__main__":

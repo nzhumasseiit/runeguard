@@ -80,11 +80,13 @@ The CLI exposes the policy and sandbox layers for testers:
 - `runeguard demo` runs the poisoned README scenario
 - `runeguard eval` evaluates one action without executing it
 - `runeguard run -- <command>` runs a command in the Docker sandbox backend
+- `runeguard run --backend landlock -- <command>` runs a Linux Landlock filesystem sandbox
 - `runeguard run --backend host -- <command>` gates a host subprocess through shell policy
 - `runeguard run --backend host --preload -- <command>` launches a host command with the shim
 - `runeguard daemon start` starts the policy daemon
 - `runeguard shim build` builds the Linux shim
-- `runeguard ebpf trace` starts BCC/eBPF syscall tracing
+- `runeguard ebpf trace` starts libbpf/CO-RE syscall tracing
+- `runeguard ebpf enforce` starts the libbpf/CO-RE loader in enforcement mode
 
 ## Docker Sandbox
 
@@ -107,6 +109,13 @@ locations such as `~/.ssh`, `~/.aws`, and `~/.config`. The unsafe compatibility
 flag `--unsafe-writable-workspace` restores the old writable workspace mount
 when a tool cannot yet operate with policy-driven writable paths.
 
+## Landlock Backend
+
+`runeguard.core.landlock.LandlockSandboxRunner` is an optional Linux filesystem
+enforcement backend. It allows read access to a filtered workspace and write
+access only to policy `writable_paths`. It fails closed if Landlock is
+unavailable unless `--allow-weak-fallback` is explicitly set.
+
 ## Agent Helpers
 
 `runeguard.agents` contains small adapter classes for routing agent tool calls through `RuneGuardProxy`.
@@ -117,15 +126,21 @@ Current helpers:
 - `GuardedLangChainTools`
 - `GuardedToolRegistry`
 
-## eBPF Tracer
+## eBPF Loader
 
-`runeguard.ebpf` contains a BCC loader and probe source for Linux syscall visibility:
+`runeguard.ebpf` wraps a standalone libbpf/CO-RE loader. The eBPF source lives
+under `ebpf/` and builds with `make -C ebpf` on Linux.
 
 - `execve`
 - `openat`
 - `connect`
+- BPF LSM file-open visibility and exec enforcement hooks
 
-The v1 eBPF layer is visibility-first. It prints structured events and is intended to become the runtime verification layer.
+The Python package does not depend on BCC or kernel headers at runtime. A built
+loader can be copied into the package with `make -C ebpf install-package`.
+Enforcement mode seeds a kernel map with denied executable basenames and returns
+`EACCES` from the BPF LSM exec hook on matches. It requires a Linux kernel with
+BPF LSM enabled and the privileges normally required for loading BPF programs.
 
 ## Audit Logs
 
@@ -136,4 +151,5 @@ The v1 eBPF layer is visibility-first. It prints structured events and is intend
 Policy/proxy mode is not a hard security boundary because it only controls
 actions routed through RuneGuard. The LD_PRELOAD shim is experimental and
 bypassable. Docker sandbox mode is the first step toward stronger enforcement.
-The eBPF layer observes behavior but does not enforce policy yet.
+The eBPF layer is experimental; Docker and Landlock are the practical runtime
+boundaries today.

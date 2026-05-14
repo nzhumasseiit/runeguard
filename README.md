@@ -26,11 +26,15 @@ RuneGuard is for developers and teams running coding agents in:
 ## Quickstart
 
 ```bash
-git clone https://github.com/nzhumasseiit/runeguard.git
-cd runeguard
-pip install -e .
+pip install runeguard
 runeguard check
 runeguard demo
+```
+
+From a checkout:
+
+```bash
+pip install -e .
 ```
 
 Run the named poisoned README example:
@@ -110,10 +114,16 @@ runeguard shim build
 runeguard run --backend host --preload -- python -c "open('.env').read()"
 ```
 
-On Linux with BCC installed, trace runtime activity:
+On Linux with a built libbpf/CO-RE loader, trace runtime activity:
 
 ```bash
 runeguard ebpf trace
+```
+
+On Linux with Landlock support, run with kernel-native filesystem enforcement:
+
+```bash
+runeguard run --backend landlock -- python -c "open('README.md').read()"
 ```
 
 ## Demo
@@ -146,7 +156,10 @@ Working now:
 - `runeguard report <audit.jsonl> --html` audit reports
 - Unix socket policy daemon
 - Linux LD_PRELOAD shim source and build target
-- BCC/eBPF tracer foundation for `execve`, `openat`, and `connect`
+- Linux Landlock filesystem sandbox backend
+- libbpf/CO-RE eBPF source and loader interface for `execve`, `openat`, `connect`, and BPF LSM exec enforcement
+- optional OPA/Rego policy backend
+- process correlation metadata in JSONL audit logs
 - agent integration helpers
 - file access policy
 - shell command policy
@@ -158,10 +171,8 @@ Working now:
 Planned:
 
 - Docker/Podman hardening
-- Landlock filesystem restrictions
-- HTML/JSON audit reports
-- process correlation
-- eBPF-backed enforcement
+- signed release artifacts
+- deeper eBPF policy map enforcement beyond the current loader interface
 - CI/devbox sandbox mode
 
 ## v1 Test Surface
@@ -197,8 +208,10 @@ The Docker sandbox mode is the first step toward stronger enforcement: it gives
 RuneGuard a real process boundary with non-root execution, an isolated container
 filesystem view, network denial by default, and resource limits.
 
-The eBPF layer is currently audit and visibility work. It is not the primary
-enforcement layer yet.
+The eBPF layer uses libbpf/CO-RE source and a standalone loader interface. Its
+enforcement mode can deny configured executable names through BPF LSM, but it
+depends on Linux BPF LSM support and the privileges required by the host. It is
+not the primary filesystem enforcement layer; use Docker or Landlock for that.
 
 ## Try To Break It
 

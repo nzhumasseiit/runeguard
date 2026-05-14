@@ -1,3 +1,3 @@
-from .loader import EbpfTracer
+from .loader import EbpfConfig, EbpfTracer
 
-__all__ = ["EbpfTracer"]
+__all__ = ["EbpfConfig", "EbpfTracer"]

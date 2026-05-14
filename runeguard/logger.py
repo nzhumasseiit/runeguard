@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .correlation import annotate_record
 from .decision import DecisionType
 
 try:
@@ -47,13 +48,13 @@ def log_decision(
 
 
 def decision_record(tool_name: str, decision, kwargs: dict) -> dict:
-    return {
+    return annotate_record({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tool": tool_name,
         "decision": decision.type.value,
         "reason": decision.reason,
         "input": _redact(kwargs),
-    }
+    }, kwargs)
 
 
 def write_audit_record(path: str | Path, record: dict):

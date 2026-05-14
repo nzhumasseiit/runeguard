@@ -1,0 +1,4 @@
+include README.md LICENSE
+recursive-include ebpf *.c *.h Makefile README.md
+recursive-include scripts *.sh
+recursive-include policies *.yaml

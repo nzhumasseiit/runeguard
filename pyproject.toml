@@ -7,12 +7,31 @@ name = "runeguard"
 version = "1.0.0"
 description = "Runtime enforcement layer for AI agents"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "pyyaml>=6.0.0",
     "typer>=0.12.0",
     "rich>=13.0.0"
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "build>=1.2.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/nzhumasseiit/runeguard"
+Repository = "https://github.com/nzhumasseiit/runeguard"
+Issues = "https://github.com/nzhumasseiit/runeguard/issues"
 
 [project.scripts]
 runeguard = "runeguard.cli:app"
@@ -25,9 +44,15 @@ include = ["runeguard*"]
 
 [tool.setuptools.package-data]
 runeguard = [
+    "default_policy.yaml",
     "shim/preload.c",
     "shim/Makefile",
+    "ebpf/Makefile",
+    "ebpf/src/*.c",
+    "ebpf/include/*.h",
     "ebpf/probes/*.c",
+    "ebpf/runeguard-ebpf-loader",
+    "ebpf/runeguard.bpf.o",
     "seccomp/*.py",
     "mcp/*.py"
 ]

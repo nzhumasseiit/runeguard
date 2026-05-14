@@ -72,7 +72,9 @@ def test_doctor_passes_when_critical_requirements_exist(monkeypatch):
 
     assert result.exit_code == 0
     assert "Docker executable found" in result.stdout
-    assert "Docker daemon reachable" in result.stdout
+    assert "Docker: available" in result.stdout
+    assert "Default backend:" in result.stdout
+    assert "Security mode: fail-closed" in result.stdout
 
 
 def test_doctor_fails_when_docker_missing(monkeypatch):
@@ -217,6 +219,39 @@ def test_run_command_rejects_preload_with_docker_backend():
     assert result.exit_code == 2
     output = result.stdout + result.stderr
     assert "only supported with --backend host" in output
+
+
+def test_run_command_rejects_landlock_backend_without_fallback(monkeypatch):
+    monkeypatch.setattr("runeguard.core.landlock.landlock_available", lambda: False)
+    monkeypatch.setattr("runeguard.cli.landlock_available", lambda: False)
+
+    result = runner.invoke(app, ["run", "--backend", "landlock", "--", "python", "-c", "print('guarded')"])
+
+    assert result.exit_code == 2
+    output = result.stdout + result.stderr
+    assert "fail-closed" in output
+
+
+def test_run_command_allows_landlock_weak_fallback(monkeypatch):
+    calls = []
+
+    def fake_run(argv, cwd, check):
+        calls.append((argv, cwd, check))
+        from subprocess import CompletedProcess
+
+        return CompletedProcess(argv, 0)
+
+    monkeypatch.setattr("runeguard.core.landlock.landlock_available", lambda: False)
+    monkeypatch.setattr("runeguard.cli.landlock_available", lambda: False)
+    monkeypatch.setattr("runeguard.core.landlock.subprocess.run", fake_run)
+
+    result = runner.invoke(
+        app,
+        ["run", "--backend", "landlock", "--allow-weak-fallback", "--", "python", "-c", "print('guarded')"],
+    )
+
+    assert result.exit_code == 0
+    assert calls
 
 
 def test_run_command_supports_unsafe_writable_workspace(monkeypatch):

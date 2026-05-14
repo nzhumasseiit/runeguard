@@ -2,6 +2,7 @@ import os
 import shlex
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatch
+from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -13,7 +14,9 @@ from .decision import Decision, DecisionType
 @dataclass(frozen=True)
 class PolicyConfig:
     version: int = 1
+    policy_backend: str = "yaml"
     sandbox_backend: str = "docker"
+    fs_enforcement: str = "none"
     network: str = "deny"
     readonly_rootfs: bool = True
     readonly_workspace: bool = True
@@ -25,6 +28,9 @@ class PolicyConfig:
     require_approval: list[str] = field(default_factory=list)
     allowed_env_vars: list[str] = field(default_factory=list)
     max_file_size_mb: int = 10
+    opa_policy: str = ""
+    opa_query: str = "data.runeguard.allow"
+    opa_command: str = "opa"
 
     @classmethod
     def from_mapping(cls, data: dict):
@@ -49,8 +55,10 @@ class Policy:
 
         self.protected_paths = self.config.protected_paths
         self.version = self.config.version
+        self.policy_backend = self.config.policy_backend
         self.allowed_paths = self.config.allowed_paths
         self.sandbox_backend = self.config.sandbox_backend
+        self.fs_enforcement = self.config.fs_enforcement
         self.network = self.config.network
         self.readonly_rootfs = self.config.readonly_rootfs
         self.readonly_workspace = self.config.readonly_workspace
@@ -60,17 +68,40 @@ class Policy:
         self.require_approval = self.config.require_approval
         self.allowed_env_vars = self.config.allowed_env_vars
         self.max_file_size_mb = self.config.max_file_size_mb
+        self.opa_policy = self.config.opa_policy
+        self.opa_query = self.config.opa_query
+        self.opa_command = self.config.opa_command
         self._validate()
 
     @classmethod
     def from_file(cls, path: str):
-        with open(path, "r", encoding="utf-8") as f:
+        policy_path = Path(path)
+        if policy_path.exists():
+            with policy_path.open("r", encoding="utf-8") as f:
+                return cls(yaml.safe_load(f) or {})
+
+        if path in {"policies/default.yaml", "default.yaml"}:
+            default_policy = files("runeguard").joinpath("default_policy.yaml")
+            return cls(yaml.safe_load(default_policy.read_text(encoding="utf-8")) or {})
+
+        with policy_path.open("r", encoding="utf-8") as f:
             return cls(yaml.safe_load(f) or {})
 
     def summary(self) -> dict:
         return asdict(self.config)
 
     def decide(self, tool_name: str, **kwargs) -> Decision:
+        if self.policy_backend == "opa":
+            from .opa import OpaConfig, OpaPolicyBackend
+
+            return OpaPolicyBackend(
+                OpaConfig(
+                    policy=self.opa_policy,
+                    query=self.opa_query,
+                    command=self.opa_command,
+                )
+            ).decide(tool_name, kwargs)
+
         if tool_name in self.require_approval:
             return Decision(
                 DecisionType.REQUIRE_APPROVAL,
@@ -259,8 +290,23 @@ class Policy:
         if not isinstance(self.max_file_size_mb, int) or self.max_file_size_mb < 1:
             raise ValueError("max_file_size_mb must be a positive integer")
 
-        if self.sandbox_backend not in {"docker", "host"}:
-            raise ValueError("sandbox_backend must be one of: docker, host")
+        if self.policy_backend not in {"yaml", "opa"}:
+            raise ValueError("policy_backend must be one of: yaml, opa")
+
+        if not isinstance(self.opa_policy, str):
+            raise ValueError("opa_policy must be a string")
+
+        if not isinstance(self.opa_query, str) or not self.opa_query:
+            raise ValueError("opa_query must be a non-empty string")
+
+        if not isinstance(self.opa_command, str) or not self.opa_command:
+            raise ValueError("opa_command must be a non-empty string")
+
+        if self.sandbox_backend not in {"docker", "host", "landlock"}:
+            raise ValueError("sandbox_backend must be one of: docker, host, landlock")
+
+        if self.fs_enforcement not in {"none", "landlock"}:
+            raise ValueError("fs_enforcement must be one of: none, landlock")
 
         if self.network not in {"deny", "deny_all", "none", "host", "bridge"}:
             raise ValueError("network must be one of: deny, deny_all, none, host, bridge")
@@ -276,26 +322,40 @@ class Policy:
 
 
 def normalize_policy_mapping(data: dict) -> dict:
-    if "sandbox" not in data and "files" not in data and "network" not in data and "shell" not in data:
+    if (
+        "sandbox" not in data
+        and "files" not in data
+        and "network" not in data
+        and "shell" not in data
+        and "policy" not in data
+        and "opa" not in data
+    ):
         return data
 
     sandbox = data.get("sandbox", {}) or {}
+    policy_backend = data.get("policy", {}) or {}
     files = data.get("files", {}) or {}
     network = data.get("network", {}) or {}
     shell = data.get("shell", {}) or {}
+    opa = data.get("opa", {}) or {}
 
     return {
         "version": data.get("version", 1),
-        "sandbox_backend": sandbox.get("backend", "docker"),
-        "network": network.get("default", sandbox.get("network", "deny")),
-        "readonly_rootfs": sandbox.get("readonly_rootfs", True),
-        "readonly_workspace": sandbox.get("readonly_workspace", True),
-        "protected_paths": files.get("deny", []),
-        "allowed_paths": files.get("allow", []),
-        "writable_paths": sandbox.get("writable_paths", []),
-        "allowed_domains": network.get("allow_domains", []),
-        "blocked_commands": shell.get("deny_patterns", []),
+        "policy_backend": policy_backend.get("backend", data.get("policy_backend", "yaml")),
+        "sandbox_backend": sandbox.get("backend", data.get("sandbox_backend", "docker")),
+        "fs_enforcement": sandbox.get("fs_enforcement", data.get("fs_enforcement", "none")),
+        "network": network.get("default", sandbox.get("network", data.get("network", "deny"))),
+        "readonly_rootfs": sandbox.get("readonly_rootfs", data.get("readonly_rootfs", True)),
+        "readonly_workspace": sandbox.get("readonly_workspace", data.get("readonly_workspace", True)),
+        "protected_paths": files.get("deny", data.get("protected_paths", [])),
+        "allowed_paths": files.get("allow", data.get("allowed_paths", [])),
+        "writable_paths": sandbox.get("writable_paths", data.get("writable_paths", [])),
+        "allowed_domains": network.get("allow_domains", data.get("allowed_domains", [])),
+        "blocked_commands": shell.get("deny_patterns", data.get("blocked_commands", [])),
         "require_approval": data.get("require_approval", []),
         "allowed_env_vars": data.get("allowed_env_vars", []),
         "max_file_size_mb": data.get("max_file_size_mb", 10),
+        "opa_policy": opa.get("policy", data.get("opa_policy", "")),
+        "opa_query": opa.get("query", data.get("opa_query", "data.runeguard.allow")),
+        "opa_command": opa.get("command", data.get("opa_command", "opa")),
     }
