@@ -13,7 +13,43 @@ except TypeError:
 def test_check_command_loads_policy():
     result = runner.invoke(app, ["check"])
     assert result.exit_code == 0
-    assert "Policy loaded" in result.stdout
+    assert "Python 3.10+" in result.stdout
+    assert "Recommended backend:" in result.stdout
+
+
+def test_check_command_prints_health_table(monkeypatch):
+    monkeypatch.setattr("runeguard.cli.shutil.which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr("runeguard.cli._docker_daemon_reachable", lambda: True)
+    monkeypatch.setattr("runeguard.cli.platform.system", lambda: "Darwin")
+
+    result = runner.invoke(app, ["check"])
+
+    assert result.exit_code == 0
+    assert "✓ Python 3.10+" in result.stdout
+    assert "✓ Docker available" in result.stdout
+    assert "✗ Linux required for Landlock" in result.stdout
+    assert "✗ Linux + root required for eBPF" in result.stdout
+    assert "→ Recommended backend: docker" in result.stdout
+
+
+def test_quickstart_recommends_docker(monkeypatch):
+    monkeypatch.setattr("runeguard.cli._docker_available", lambda: True)
+
+    result = runner.invoke(app, ["quickstart"])
+
+    assert result.exit_code == 0
+    assert "Docker detected. Recommended: runeguard run --profile ci -- your-command" in result.stdout
+
+
+def test_quickstart_recommends_landlock_on_linux(monkeypatch):
+    monkeypatch.setattr("runeguard.cli._docker_available", lambda: False)
+    monkeypatch.setattr("runeguard.cli.platform.system", lambda: "Linux")
+    monkeypatch.setattr("runeguard.cli.landlock_available", lambda: True)
+
+    result = runner.invoke(app, ["quickstart"])
+
+    assert result.exit_code == 0
+    assert "Linux detected. Recommended: runeguard run --backend landlock -- your-command" in result.stdout
 
 
 def test_init_creates_policy_and_state_files():

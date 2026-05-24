@@ -2,6 +2,7 @@ import json
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -437,12 +438,28 @@ def demo(
 
 
 @app.command()
+def quickstart():
+    """
+    Print the recommended RuneGuard run command for this environment.
+    """
+    if _docker_available():
+        typer.echo("Docker detected. Recommended: runeguard run --profile ci -- your-command")
+        return
+
+    if platform.system() == "Linux" and landlock_available():
+        typer.echo("Linux detected. Recommended: runeguard run --backend landlock -- your-command")
+        return
+
+    typer.echo("Recommended: runeguard run --backend host -- your-command")
+
+
+@app.command()
 def check(
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
     json_output: bool = typer.Option(False, "--json", help="Print policy summary as JSON."),
 ):
     """
-    Check that a policy file can be loaded.
+    Print a RuneGuard environment health table.
     """
     loaded = Policy.from_file(policy)
     if json_output:
@@ -451,9 +468,23 @@ def check(
         typer.echo(json.dumps(loaded.summary(), sort_keys=True))
         return
 
-    typer.echo(f"Policy loaded: {policy}")
-    typer.echo(f"Protected paths: {loaded.protected_paths}")
-    typer.echo(f"Allowed domains: {loaded.allowed_domains}")
+    python_ok = sys.version_info >= (3, 10)
+    docker_ok = _docker_available()
+    is_linux = platform.system() == "Linux"
+    landlock_ok = is_linux and landlock_available()
+    ebpf_ok = is_linux and os.geteuid() == 0 and _linux_ebpf_likely_available()
+    recommended = _recommended_backend(docker_ok=docker_ok, landlock_ok=landlock_ok)
+
+    rows = [
+        ("✓" if python_ok else "✗", "Python 3.10+"),
+        ("✓" if docker_ok else "✗", "Docker available"),
+        ("✓" if landlock_ok else "✗", "Linux required for Landlock"),
+        ("✓" if ebpf_ok else "✗", "Linux + root required for eBPF"),
+        ("→", f"Recommended backend: {recommended}"),
+    ]
+
+    for marker, message in rows:
+        typer.echo(f"{marker} {message}")
 
 
 @app.command("eval")
@@ -627,6 +658,21 @@ def _docker_daemon_reachable() -> bool:
         return False
 
     return result.returncode == 0
+
+
+def _docker_available() -> bool:
+    return bool(shutil.which("docker") and _docker_daemon_reachable())
+
+
+def _recommended_backend(*, docker_ok: bool | None = None, landlock_ok: bool | None = None) -> str:
+    docker_ok = _docker_available() if docker_ok is None else docker_ok
+    landlock_ok = (platform.system() == "Linux" and landlock_available()) if landlock_ok is None else landlock_ok
+
+    if docker_ok:
+        return "docker"
+    if landlock_ok:
+        return "landlock"
+    return "host"
 
 
 def _linux_seccomp_likely_available() -> bool:

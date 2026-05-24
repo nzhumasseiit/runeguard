@@ -2,6 +2,15 @@
 
 **Runtime enforcement for AI coding agents.**
 
+## Try it in 30 seconds
+```bash
+pip install runeguard
+runeguard demo
+```
+
+## Or open in a Codespace
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nzhumasseiit/runeguard)
+
 RuneGuard v0.1.0 is an early alpha. The policy engine, demo, audit logs, and
 Docker sandbox path are usable today, while Linux kernel integrations are still
 experimental and platform-dependent.
@@ -26,14 +35,6 @@ RuneGuard is for developers and teams running coding agents in:
 - CI runners
 - ephemeral sandboxes
 - internal automation environments
-
-## Quickstart
-
-```bash
-pip install runeguard
-runeguard check
-runeguard demo
-```
 
 From a checkout:
 
