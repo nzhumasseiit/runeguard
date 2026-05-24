@@ -13,15 +13,14 @@ def test_decision_record_includes_agent_turn_correlation():
             {"command": "echo hello", "argv": ["echo", "hello"]},
         )
 
-    correlation = record["correlation"]
-    assert correlation["turn_id"] == "turn-1"
-    assert correlation["agent"] == "fake-agent"
-    assert correlation["spawned_by_turn"] == "turn-1"
-    assert correlation["event_id"].startswith("cmd_")
-    assert correlation["causal_chain"] == ["turn-1"]
+    assert record["run_id"] == "turn-1"
+    assert record["agent"] == "fake-agent"
+    assert record["tool_call"] == "shell"
+    assert record["command"] == "echo hello"
+    assert "correlation" not in record
 
 
-def test_audit_log_preserves_correlation(tmp_path):
+def test_audit_log_preserves_run_id(tmp_path):
     audit_log = tmp_path / "audit.jsonl"
 
     with agent_turn(agent="fake-agent", turn_id="turn-2", parent_turn_id="turn-1"):
@@ -31,4 +30,6 @@ def test_audit_log_preserves_correlation(tmp_path):
         )
 
     record = json.loads(audit_log.read_text(encoding="utf-8"))
-    assert record["correlation"]["causal_chain"] == ["turn-1", "turn-2"]
+    assert record["run_id"] == "turn-2"
+    assert record["agent"] == "fake-agent"
+    assert "correlation" not in record

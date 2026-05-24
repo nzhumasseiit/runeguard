@@ -1,6 +1,6 @@
 # Architecture
 
-RuneGuard v1 has six small layers.
+RuneGuard v0.1.0 has six small layers.
 
 ## Policy
 

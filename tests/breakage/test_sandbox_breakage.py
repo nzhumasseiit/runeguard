@@ -150,7 +150,7 @@ def test_rm_rf_blocked():
     assert decision.type == DecisionType.BLOCK
 
 
-def test_audit_log_redacts_secret_values(tmp_path):
+def test_audit_log_uses_fixed_schema_without_payload_values(tmp_path):
     audit_log = tmp_path / "audit.jsonl"
     log_decision(
         "http_post",
@@ -161,7 +161,22 @@ def test_audit_log_redacts_secret_values(tmp_path):
     )
 
     record = json.loads(audit_log.read_text(encoding="utf-8"))
-    assert record["input"]["payload"] == "<redacted>"
+    assert set(record) == {
+        "run_id",
+        "agent",
+        "tool_call",
+        "command",
+        "path",
+        "pid",
+        "ppid",
+        "decision",
+        "rule_matched",
+        "reason",
+        "timestamp",
+    }
+    assert record["tool_call"] == "http_post"
+    assert record["decision"] == "block"
+    assert "SECRET=abc" not in json.dumps(record)
     summary = summarize_audit_log(audit_log)
     assert summary["blocked"] == 1
 

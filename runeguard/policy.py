@@ -27,6 +27,7 @@ class PolicyConfig:
     blocked_commands: list[str] = field(default_factory=list)
     require_approval: list[str] = field(default_factory=list)
     allowed_env_vars: list[str] = field(default_factory=list)
+    env_var_strip_pattern: list[str] = field(default_factory=list)
     max_file_size_mb: int = 10
     opa_policy: str = ""
     opa_query: str = "data.runeguard.allow"
@@ -67,6 +68,7 @@ class Policy:
         self.blocked_commands = self.config.blocked_commands
         self.require_approval = self.config.require_approval
         self.allowed_env_vars = self.config.allowed_env_vars
+        self.env_var_strip_pattern = self.config.env_var_strip_pattern
         self.max_file_size_mb = self.config.max_file_size_mb
         self.opa_policy = self.config.opa_policy
         self.opa_query = self.config.opa_query
@@ -86,6 +88,15 @@ class Policy:
 
         with policy_path.open("r", encoding="utf-8") as f:
             return cls(yaml.safe_load(f) or {})
+
+    @classmethod
+    def from_profile(cls, name: str):
+        profile_name = Path(name).name.removesuffix(".yaml")
+        profile_path = files("runeguard").joinpath("profiles", f"{profile_name}.yaml")
+        if not profile_path.is_file():
+            raise ValueError(f"unknown policy profile: {name}")
+
+        return cls(yaml.safe_load(profile_path.read_text(encoding="utf-8")) or {})
 
     def summary(self) -> dict:
         return asdict(self.config)
@@ -295,6 +306,7 @@ class Policy:
             "blocked_commands": self.blocked_commands,
             "require_approval": self.require_approval,
             "allowed_env_vars": self.allowed_env_vars,
+            "env_var_strip_pattern": self.env_var_strip_pattern,
         }
 
         for name, value in fields.items():
@@ -371,6 +383,7 @@ def normalize_policy_mapping(data: dict) -> dict:
         "blocked_commands": shell.get("deny_patterns", data.get("blocked_commands", [])),
         "require_approval": data.get("require_approval", []),
         "allowed_env_vars": data.get("allowed_env_vars", []),
+        "env_var_strip_pattern": data.get("env_var_strip_pattern", []),
         "max_file_size_mb": data.get("max_file_size_mb", 10),
         "opa_policy": opa.get("policy", data.get("opa_policy", "")),
         "opa_query": opa.get("query", data.get("opa_query", "data.runeguard.allow")),

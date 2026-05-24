@@ -1,0 +1,43 @@
+version: 1
+
+policy:
+  backend: yaml
+
+sandbox:
+  backend: host
+  fs_enforcement: none
+  network: deny
+  readonly_rootfs: true
+  readonly_workspace: true
+
+files:
+  deny:
+    - ".bashrc"
+    - ".profile"
+    - ".bash_profile"
+    - "/home/*/.*"
+  allow:
+    - "**"
+
+network:
+  default: deny
+  allow_domains: []
+
+shell:
+  deny_patterns:
+    - "curl"
+    - "wget"
+    - "nc"
+    - "bash -c"
+    - "sh -c"
+
+allowed_env_vars:
+  - "CI"
+  - "GITHUB_ACTIONS"
+  - "RUNNER_OS"
+
+env_var_strip_pattern:
+  - "AWS_*"
+  - "GITHUB_TOKEN"
+  - "*_SECRET"
+  - "*_KEY"

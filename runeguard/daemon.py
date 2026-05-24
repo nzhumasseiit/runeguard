@@ -74,6 +74,9 @@ class RuneGuardDaemon:
             kwargs,
             audit_log=self.audit_log,
             json_logs=self.json_logs,
+            tool_call=tool_name,
+            command=kwargs.get("command"),
+            path=kwargs.get("path") or kwargs.get("pathname"),
         )
 
         return {

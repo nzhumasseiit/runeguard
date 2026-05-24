@@ -15,13 +15,26 @@ static volatile sig_atomic_t exiting = 0;
 struct options {
     bool enforce;
     const char *policy_path;
+    const char *blocked_paths_path;
 };
 
 static const struct argp_option opts[] = {
     {"mode", 'm', "MODE", 0, "trace or enforce"},
     {"policy", 'p', "PATH", 0, "RuneGuard policy path"},
+    {"blocked-paths", 'b', "PATH", 0, "Newline-separated protected path prefixes"},
     {},
 };
+
+static void set_mode(struct argp_state *state, struct options *options, const char *mode)
+{
+    if (strcmp(mode, "enforce") == 0) {
+        options->enforce = true;
+    } else if (strcmp(mode, "trace") == 0) {
+        options->enforce = false;
+    } else {
+        argp_error(state, "mode must be trace or enforce");
+    }
+}
 
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
@@ -29,16 +42,22 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 
     switch (key) {
     case 'm':
-        if (strcmp(arg, "enforce") == 0) {
-            options->enforce = true;
-        } else if (strcmp(arg, "trace") == 0) {
-            options->enforce = false;
-        } else {
-            argp_error(state, "mode must be trace or enforce");
-        }
+        set_mode(state, options, arg);
         break;
     case 'p':
         options->policy_path = arg;
+        break;
+    case 'b':
+        options->blocked_paths_path = arg;
+        break;
+    case ARGP_KEY_ARG:
+        if (strcmp(arg, "trace") == 0 || strcmp(arg, "enforce") == 0) {
+            set_mode(state, options, arg);
+        } else if (!options->blocked_paths_path) {
+            options->blocked_paths_path = arg;
+        } else {
+            argp_error(state, "unexpected argument: %s", arg);
+        }
         break;
     default:
         return ARGP_ERR_UNKNOWN;
@@ -50,6 +69,7 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 static const struct argp argp = {
     .options = opts,
     .parser = parse_arg,
+    .args_doc = "[MODE] [BLOCKED_PATHS_FILE]",
     .doc = "RuneGuard libbpf/CO-RE loader",
 };
 
@@ -121,6 +141,76 @@ static int block_exec(struct runeguard_bpf *skel, const char *name)
     );
 }
 
+static int block_path(struct runeguard_bpf *skel, const char *prefix)
+{
+    struct runeguard_path_key key = {};
+    unsigned int value = 1;
+    size_t len = strlen(prefix);
+
+    if (len == 0) {
+        return 0;
+    }
+
+    if (len >= sizeof(key.prefix)) {
+        return -ENAMETOOLONG;
+    }
+
+    snprintf(key.prefix, sizeof(key.prefix), "%s", prefix);
+    return bpf_map__update_elem(
+        skel->maps.blocked_paths,
+        &key,
+        sizeof(key),
+        &value,
+        sizeof(value),
+        BPF_ANY
+    );
+}
+
+static void trim_line(char *line)
+{
+    size_t len = strlen(line);
+
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+        line[len - 1] = '\0';
+        len--;
+    }
+}
+
+static int load_blocked_paths(struct runeguard_bpf *skel, const char *path)
+{
+    FILE *file;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t len;
+    int err = 0;
+
+    if (!path) {
+        return 0;
+    }
+
+    file = fopen(path, "r");
+    if (!file) {
+        return -errno;
+    }
+
+    while ((len = getline(&line, &cap, file)) != -1) {
+        (void)len;
+        trim_line(line);
+        err = block_path(skel, line);
+        if (err) {
+            break;
+        }
+    }
+
+    if (ferror(file) && !err) {
+        err = -errno;
+    }
+
+    free(line);
+    fclose(file);
+    return err;
+}
+
 static int seed_default_exec_policy(struct runeguard_bpf *skel)
 {
     const char *blocked[] = {"rm", "curl", "nc", "scp", "ssh"};
@@ -140,6 +230,7 @@ int main(int argc, char **argv)
     struct options options = {
         .enforce = false,
         .policy_path = "policies/default.yaml",
+        .blocked_paths_path = NULL,
     };
     struct runeguard_bpf *skel;
     struct ring_buffer *rb = NULL;
@@ -175,6 +266,12 @@ int main(int argc, char **argv)
     err = seed_default_exec_policy(skel);
     if (err) {
         fprintf(stderr, "failed to seed default eBPF exec policy: %s\n", strerror(-err));
+        goto cleanup;
+    }
+
+    err = load_blocked_paths(skel, options.blocked_paths_path);
+    if (err) {
+        fprintf(stderr, "failed to load eBPF blocked paths: %s\n", strerror(-err));
         goto cleanup;
     }
 

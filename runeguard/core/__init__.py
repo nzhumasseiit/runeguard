@@ -1,6 +1,6 @@
 from .interceptor import InterceptorConfig, RuneGuardInterceptor
 from .landlock import LandlockConfig, LandlockSandboxRunner
-from .sandbox import SandboxConfig, SandboxRunner
+from .sandbox import SandboxConfig, SandboxRunner, filter_child_env
 
 __all__ = [
     "InterceptorConfig",
@@ -9,4 +9,5 @@ __all__ = [
     "LandlockSandboxRunner",
     "SandboxConfig",
     "SandboxRunner",
+    "filter_child_env",
 ]

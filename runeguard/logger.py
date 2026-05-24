@@ -1,8 +1,7 @@
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-from .correlation import annotate_record
+from .audit import audit_record
 from .decision import DecisionType
 
 try:
@@ -21,8 +20,20 @@ def log_decision(
     audit_log: str | Path | None = None,
     json_logs: bool = False,
     quiet: bool = False,
+    tool_call: str | None = None,
+    command: str | None = None,
+    path: str | None = None,
+    rule_matched: str | None = None,
 ):
-    record = decision_record(tool_name, decision, kwargs)
+    record = decision_record(
+        tool_name,
+        decision,
+        kwargs,
+        tool_call=tool_call,
+        command=command,
+        path=path,
+        rule_matched=rule_matched,
+    )
 
     if audit_log:
         write_audit_record(audit_log, record)
@@ -47,14 +58,24 @@ def log_decision(
         print(msg)
 
 
-def decision_record(tool_name: str, decision, kwargs: dict) -> dict:
-    return annotate_record({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tool": tool_name,
-        "decision": decision.type.value,
-        "reason": decision.reason,
-        "input": _redact(kwargs),
-    }, kwargs)
+def decision_record(
+    tool_name: str,
+    decision,
+    kwargs: dict,
+    *,
+    tool_call: str | None = None,
+    command: str | None = None,
+    path: str | None = None,
+    rule_matched: str | None = None,
+) -> dict:
+    return audit_record(
+        tool_call=tool_call or tool_name,
+        command=command if command is not None else _command_from_kwargs(kwargs),
+        path=path if path is not None else _path_from_kwargs(kwargs),
+        decision=decision.type.value,
+        rule_matched=rule_matched if rule_matched is not None else _rule_from_reason(decision.reason),
+        reason=decision.reason,
+    )
 
 
 def write_audit_record(path: str | Path, record: dict):
@@ -66,23 +87,33 @@ def write_audit_record(path: str | Path, record: dict):
         f.write("\n")
 
 
-def _redact(value):
-    if isinstance(value, dict):
-        redacted = {}
+def _command_from_kwargs(kwargs: dict) -> str | None:
+    command = kwargs.get("command")
+    if command is not None:
+        return str(command)
 
-        for key, item in value.items():
-            key_text = str(key).lower()
-            if key_text in {"data", "body", "payload", "secret", "token", "password"}:
-                redacted[key] = "<redacted>"
-            else:
-                redacted[key] = _redact(item)
+    argv = kwargs.get("argv")
+    if isinstance(argv, (list, tuple)):
+        return " ".join(str(part) for part in argv)
 
-        return redacted
+    return None
 
-    if isinstance(value, list):
-        return [_redact(item) for item in value]
 
-    if isinstance(value, tuple):
-        return [_redact(item) for item in value]
+def _path_from_kwargs(kwargs: dict) -> str | None:
+    path = kwargs.get("path") or kwargs.get("pathname")
+    return str(path) if path is not None else None
 
-    return value
+
+def _rule_from_reason(reason: str) -> str | None:
+    if ": " not in reason:
+        return None
+
+    prefix, matched = reason.split(": ", 1)
+    if prefix in {
+        "protected path access",
+        "blocked shell command pattern",
+        "domain not allowlisted",
+    }:
+        return matched
+
+    return None

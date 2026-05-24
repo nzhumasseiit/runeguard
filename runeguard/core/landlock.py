@@ -10,6 +10,7 @@ from pathlib import Path
 
 from runeguard.decision import DecisionType
 from runeguard.policy import Policy
+from runeguard.core.sandbox import filter_child_env
 
 
 SYS_LANDLOCK_CREATE_RULESET = 444
@@ -93,7 +94,12 @@ class LandlockSandboxRunner:
 
         if not landlock_available():
             if self.config.allow_weak_fallback:
-                return subprocess.run(argv, cwd=self.workspace, check=False).returncode
+                return subprocess.run(
+                    argv,
+                    cwd=self.workspace,
+                    env=filter_child_env(self.policy),
+                    check=False,
+                ).returncode
             raise LandlockUnavailable(
                 "Landlock is unavailable. Fix: run on Linux kernel >= 5.13 with Landlock enabled, or pass --allow-weak-fallback for policy-only execution."
             )
@@ -144,7 +150,7 @@ def _fork_exec_with_landlock(argv: list[str], policy: Policy, workspace: Path, f
         try:
             apply_landlock(policy, workspace, filtered)
             os.chdir(filtered)
-            os.execvp(argv[0], argv)
+            os.execvpe(argv[0], argv, filter_child_env(policy))
         except Exception as exc:
             print(f"[RuneGuard] Landlock setup failed: {exc}", file=os.sys.stderr)
             os._exit(1)

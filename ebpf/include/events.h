@@ -32,4 +32,8 @@ struct runeguard_exec_key {
     char name[RUNEGUARD_EXEC_NAME_LEN];
 };
 
+struct runeguard_path_key {
+    char prefix[RUNEGUARD_TARGET_LEN];
+};
+
 #endif

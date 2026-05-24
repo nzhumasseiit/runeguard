@@ -1,8 +1,11 @@
 import platform
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from runeguard.policy import Policy
 
 
 DEFAULT_LOADER_NAME = "runeguard-ebpf-loader"
@@ -26,14 +29,23 @@ class EbpfTracer:
             raise RuntimeError("RuneGuard eBPF requires Linux")
 
         loader = self._resolve_loader()
-        argv = [
-            str(loader),
-            "--mode",
-            self.config.mode,
-            "--policy",
-            self.config.policy,
-        ]
-        return subprocess.run(argv, check=False).returncode
+        with tempfile.TemporaryDirectory(prefix="runeguard-ebpf-") as temp_dir:
+            blocked_paths_path = self._write_blocked_paths_file(Path(temp_dir))
+            argv = [
+                str(loader),
+                self.config.mode,
+                str(blocked_paths_path),
+                "--policy",
+                self.config.policy,
+            ]
+            return subprocess.run(argv, check=False).returncode
+
+    def _write_blocked_paths_file(self, directory: Path) -> Path:
+        blocked_paths_path = directory / "blocked_paths.txt"
+        policy = Policy.from_file(self.config.policy)
+        content = "".join(f"{path}\n" for path in policy.protected_paths)
+        blocked_paths_path.write_text(content, encoding="utf-8")
+        return blocked_paths_path
 
     def _resolve_loader(self) -> Path:
         if self.config.loader_path:

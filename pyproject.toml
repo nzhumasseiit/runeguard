@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "runeguard"
-version = "1.0.0"
+version = "0.1.0"
 description = "Runtime enforcement layer for AI agents"
 readme = "README.md"
 license = "MIT"
@@ -53,6 +53,7 @@ runeguard = [
     "ebpf/probes/*.c",
     "ebpf/runeguard-ebpf-loader",
     "ebpf/runeguard.bpf.o",
+    "profiles/*.yaml",
     "seccomp/*.py",
     "mcp/*.py"
 ]

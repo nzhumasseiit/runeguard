@@ -4,7 +4,10 @@ import json
 from runeguard.cli import app
 
 
-runner = CliRunner()
+try:
+    runner = CliRunner(mix_stderr=False)
+except TypeError:
+    runner = CliRunner()
 
 
 def test_check_command_loads_policy():
@@ -235,8 +238,8 @@ def test_run_command_rejects_landlock_backend_without_fallback(monkeypatch):
 def test_run_command_allows_landlock_weak_fallback(monkeypatch):
     calls = []
 
-    def fake_run(argv, cwd, check):
-        calls.append((argv, cwd, check))
+    def fake_run(argv, cwd, env, check):
+        calls.append((argv, cwd, env, check))
         from subprocess import CompletedProcess
 
         return CompletedProcess(argv, 0)
@@ -293,7 +296,7 @@ def test_demo_command_can_write_audit_log(tmp_path):
 
     assert result.exit_code == 0
     assert audit_path.exists()
-    assert '"decision": "BLOCK"' in audit_path.read_text(encoding="utf-8")
+    assert '"decision": "block"' in audit_path.read_text(encoding="utf-8")
 
 
 def test_daemon_status_reports_missing_socket(tmp_path):

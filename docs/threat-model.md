@@ -23,7 +23,7 @@ Examples:
 - a generated instruction asks the agent to POST files to an external domain
 - a tool response tries to smuggle a second action inside normal-looking output
 
-## In Scope For v1
+## In Scope For v0.1.0
 
 - deciding whether a requested file action should be allowed
 - deciding whether a requested shell command should be allowed
@@ -34,11 +34,11 @@ Examples:
 - denying network access by default in Docker sandbox mode
 - applying simple Docker memory, CPU, and process limits
 - enforcing selected Linux libc calls through an LD_PRELOAD shim when a process is launched with `runeguard run --backend host --preload`
-- observing selected Linux syscalls with BCC/eBPF
+- observing selected Linux syscalls with libbpf/CO-RE eBPF after local Linux build
 - logging every allow/block decision in human-readable output and optional JSONL audit logs
 - making bypass attempts easy to reproduce with `runeguard eval`
 
-## Out Of Scope For v1
+## Out Of Scope For v0.1.0
 
 - kernel-level sandboxing outside Docker's configured isolation
 - stopping actions that do not go through RuneGuard, Docker sandbox mode, the shim, or a future enforcement layer
@@ -56,5 +56,5 @@ as the first stronger enforcement backend.
 Policy/proxy mode alone is not a hard security boundary. The LD_PRELOAD shim is
 experimental and bypassable. Docker sandbox mode provides a real process
 boundary, but it should still be treated as an early sandbox backend. The eBPF
-layer is currently for visibility and future verification, not primary
-enforcement.
+layer is Linux-only, experimental, requires local compilation and host
+privileges, and is not the primary filesystem enforcement layer.

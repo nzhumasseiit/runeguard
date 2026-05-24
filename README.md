@@ -2,6 +2,10 @@
 
 **Runtime enforcement for AI coding agents.**
 
+RuneGuard v0.1.0 is an early alpha. The policy engine, demo, audit logs, and
+Docker sandbox path are usable today, while Linux kernel integrations are still
+experimental and platform-dependent.
+
 RuneGuard sits between AI agents and the tools they use: files, shell commands, APIs, and network calls. Instead of only trying to make the model say safe things, RuneGuard controls what the agent is actually allowed to do at runtime.
 
 ## Problem
@@ -55,7 +59,7 @@ runeguard doctor
 denies network by default, keeps the root filesystem and workspace read-only,
 and grants writable mounts only for `./src`, `./tests`, and `./tmp`.
 
-Run a command in the Docker sandbox backend:
+Run a command in the Docker sandbox backend, the practical default for v0.1.0:
 
 ```bash
 runeguard run -- python -c "print('hello from guarded command')"
@@ -114,13 +118,15 @@ runeguard shim build
 runeguard run --backend host --preload -- python -c "open('.env').read()"
 ```
 
-On Linux with a built libbpf/CO-RE loader, trace runtime activity:
+On Linux with local build dependencies and the privileges needed to load eBPF
+programs, build and run the libbpf/CO-RE loader:
 
 ```bash
+scripts/install_ebpf_deps.sh
 runeguard ebpf trace
 ```
 
-On Linux with Landlock support, run with kernel-native filesystem enforcement:
+On Linux with kernel Landlock support, run the experimental Landlock backend:
 
 ```bash
 runeguard run --backend landlock -- python -c "open('README.md').read()"
@@ -156,8 +162,8 @@ Working now:
 - `runeguard report <audit.jsonl> --html` audit reports
 - Unix socket policy daemon
 - Linux LD_PRELOAD shim source and build target
-- Linux Landlock filesystem sandbox backend
-- libbpf/CO-RE eBPF source and loader interface for `execve`, `openat`, `connect`, and BPF LSM exec enforcement
+- Linux Landlock filesystem sandbox backend, experimental and kernel-dependent
+- libbpf/CO-RE eBPF source and loader interface for `execve`, `openat`, `connect`, and BPF LSM exec enforcement, experimental and requiring local Linux build
 - optional OPA/Rego policy backend
 - process correlation metadata in JSONL audit logs
 - agent integration helpers
@@ -175,7 +181,7 @@ Planned:
 - deeper eBPF policy map enforcement beyond the current loader interface
 - CI/devbox sandbox mode
 
-## v1 Test Surface
+## v0.1.0 Test Surface
 
 This repo is ready for early breakage and feedback around the policy layer.
 
@@ -204,14 +210,17 @@ avoid those routes.
 The LD_PRELOAD shim is experimental and bypassable by static binaries, direct
 syscalls, and processes that do not load the shim.
 
-The Docker sandbox mode is the first step toward stronger enforcement: it gives
+The Docker sandbox mode is the practical default backend in v0.1.0: it gives
 RuneGuard a real process boundary with non-root execution, an isolated container
 filesystem view, network denial by default, and resource limits.
 
+Landlock is Linux-only, depends on kernel support, and is experimental.
+
 The eBPF layer uses libbpf/CO-RE source and a standalone loader interface. Its
 enforcement mode can deny configured executable names through BPF LSM, but it
-depends on Linux BPF LSM support and the privileges required by the host. It is
-not the primary filesystem enforcement layer; use Docker or Landlock for that.
+depends on Linux BPF LSM support, local compilation, and the privileges required
+by the host. It is not the main filesystem enforcement layer; use Docker or
+Landlock for filesystem controls.
 
 ## Try To Break It
 

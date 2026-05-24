@@ -1,0 +1,46 @@
+name: Example CI Protected
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "runeguard/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/example-ci-protected.yml"
+
+jobs:
+  protected-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install RuneGuard test tooling
+        run: python -m pip install --upgrade pip pytest -e .
+
+      - name: Run protected install
+        run: |
+          PYTHON="$(command -v python)"
+          runeguard run --profile ci --backend host --audit-log runeguard.jsonl -- \
+            "$PYTHON" -m pip install --no-deps -e .
+
+      - name: Run protected tests
+        run: |
+          PYTHON="$(command -v python)"
+          runeguard run --profile ci --backend host --audit-log runeguard.jsonl -- \
+            "$PYTHON" -m pytest
+
+      - name: Upload RuneGuard audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runeguard-audit
+          path: runeguard.jsonl
+          if-no-files-found: ignore

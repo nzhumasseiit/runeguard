@@ -17,8 +17,8 @@ def test_landlock_runner_fails_closed_when_unavailable(monkeypatch, tmp_path):
 def test_landlock_runner_allows_explicit_weak_fallback(monkeypatch, tmp_path):
     calls = []
 
-    def fake_run(argv, cwd, check):
-        calls.append((argv, cwd, check))
+    def fake_run(argv, cwd, env, check):
+        calls.append((argv, cwd, env, check))
         return subprocess.CompletedProcess(argv, 3)
 
     monkeypatch.setattr("runeguard.core.landlock.landlock_available", lambda: False)

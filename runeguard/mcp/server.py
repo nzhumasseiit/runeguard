@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .. import __version__
 from ..policy import Policy
 from ..proxy import RuneGuardProxy
 
@@ -82,7 +83,7 @@ class RuneGuardMCPServer:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "runeguard", "version": "1.0.0"},
+                    "serverInfo": {"name": "runeguard", "version": __version__},
                 },
             }
 
@@ -112,12 +113,20 @@ class RuneGuardMCPServer:
                 result = self.proxy.call(
                     "read_file",
                     lambda path: Path(path).read_text(encoding="utf-8"),
+                    audit_fields={
+                        "tool_call": tool_name,
+                        "path": arguments.get("path"),
+                    },
                     **arguments,
                 )
             elif tool_name == "write_file":
                 self.proxy.call(
                     "write_file",
                     lambda path, content: Path(path).write_text(content, encoding="utf-8"),
+                    audit_fields={
+                        "tool_call": tool_name,
+                        "path": arguments.get("path"),
+                    },
                     **arguments,
                 )
                 result = f"Written: {arguments.get('path')}"
@@ -131,6 +140,10 @@ class RuneGuardMCPServer:
                         text=True,
                         check=False,
                     ),
+                    audit_fields={
+                        "tool_call": tool_name,
+                        "command": arguments.get("command"),
+                    },
                     **arguments,
                 )
                 result = completed.stdout + completed.stderr

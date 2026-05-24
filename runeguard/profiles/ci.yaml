@@ -1,0 +1,47 @@
+version: 1
+
+policy:
+  backend: yaml
+
+sandbox:
+  backend: docker
+  fs_enforcement: none
+  network: deny
+  readonly_rootfs: true
+  readonly_workspace: true
+  writable_paths: []
+
+files:
+  deny:
+    - ".env"
+    - "*.key"
+    - "*.pem"
+    - ".ssh/"
+    - "/etc/passwd"
+    - "/etc/shadow"
+  allow:
+    - "**"
+
+network:
+  default: deny
+  allow_domains: []
+
+shell:
+  deny_patterns:
+    - "curl"
+    - "wget"
+    - "nc"
+    - "ssh"
+    - "scp"
+    - "git clone"
+
+allowed_env_vars:
+  - "CI"
+  - "GITHUB_ACTIONS"
+  - "RUNNER_OS"
+
+env_var_strip_pattern:
+  - "AWS_*"
+  - "GITHUB_TOKEN"
+  - "*_SECRET"
+  - "*_KEY"

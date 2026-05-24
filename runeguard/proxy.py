@@ -9,8 +9,9 @@ class RuneGuardProxy:
         self.json_logs = json_logs
         self.quiet = quiet
 
-    def call(self, tool_name: str, fn, **kwargs):
+    def call(self, tool_name: str, fn, *, audit_fields: dict | None = None, **kwargs):
         decision = self.policy.decide(tool_name, **kwargs)
+        audit_fields = audit_fields or {}
         log_decision(
             tool_name,
             decision,
@@ -18,6 +19,10 @@ class RuneGuardProxy:
             audit_log=self.audit_log,
             json_logs=self.json_logs,
             quiet=self.quiet,
+            tool_call=audit_fields.get("tool_call", tool_name),
+            command=audit_fields.get("command"),
+            path=audit_fields.get("path"),
+            rule_matched=audit_fields.get("rule_matched"),
         )
 
         if decision.type == DecisionType.BLOCK:

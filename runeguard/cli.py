@@ -6,7 +6,14 @@ from pathlib import Path
 
 import typer
 
-from .audit import render_summary_html, render_summary_text, summarize_audit_log
+from .audit import (
+    build_report,
+    render_report_html,
+    render_report_json,
+    render_report_markdown,
+    render_summary_text,
+    summarize_audit_log,
+)
 from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
 from .ebpf import EbpfConfig, EbpfTracer
@@ -18,6 +25,7 @@ from .proxy import RuneGuardProxy
 from .core.docker import DockerSandboxConfig, DockerSandboxRunner, current_user_container_id
 from .core.interceptor import InterceptorConfig, RuneGuardInterceptor
 from .core.landlock import LandlockConfig, LandlockSandboxRunner, LandlockUnavailable, landlock_available
+from .core.sandbox import filter_child_env
 from .seccomp.runner import run_with_seccomp
 
 app = typer.Typer(help="RuneGuard: runtime enforcement for AI agents.")
@@ -104,6 +112,7 @@ Suggested audit log path:
 def run(
     ctx: typer.Context,
     policy: str = typer.Option("policies/default.yaml", help="Path to the policy file."),
+    profile: str | None = typer.Option(None, help="Built-in policy profile to use."),
     audit_log: str | None = typer.Option(None, help="Append decision records to this JSONL file."),
     json_logs: bool = typer.Option(False, help="Print RuneGuard decisions as JSON lines."),
     backend: str | None = typer.Option(None, help="Execution backend: docker, landlock, or host."),
@@ -135,7 +144,7 @@ def run(
         typer.echo("Fix: put your command after the '--' separator.", err=True)
         raise typer.Exit(2)
 
-    policy_obj = Policy.from_file(policy)
+    policy_obj = Policy.from_profile(profile) if profile else Policy.from_file(policy)
     if backend is None:
         backend = policy_obj.sandbox_backend
     guard = RuneGuardProxy(policy_obj, audit_log=audit_log, json_logs=json_logs)
@@ -225,7 +234,7 @@ def run(
             raise typer.Exit(1)
 
         try:
-            exit_code = run_with_seccomp(ctx.args, policy_obj, env=env)
+            exit_code = run_with_seccomp(ctx.args, policy_obj, env=filter_child_env(policy_obj, env))
         except RuntimeError as exc:
             typer.echo(f"{exc}. Fix: run on Linux with seccomp support or remove --seccomp.", err=True)
             raise typer.Exit(2)
@@ -235,7 +244,7 @@ def run(
     try:
         result = guard.call(
             "shell",
-            lambda command, argv: _run_subprocess(command, argv, env=env),
+            lambda command, argv: _run_subprocess(command, argv, policy_obj=policy_obj, env=env),
             command=command,
             argv=ctx.args,
         )
@@ -361,24 +370,42 @@ def audit_summary(audit_log: Path = typer.Argument(..., help="Path to a RuneGuar
 
 @app.command()
 def report(
-    audit_log: Path = typer.Argument(..., help="Path to a RuneGuard JSONL audit log."),
-    html: bool = typer.Option(False, "--html", help="Print an HTML audit report."),
+    logfile: Path = typer.Argument(..., help="Path to a RuneGuard JSONL audit log."),
+    report_format: str = typer.Option(
+        "markdown",
+        "--format",
+        help="Report format: markdown, html, or json.",
+    ),
+    html: bool = typer.Option(False, "--html", help="Compatibility shortcut for --format html."),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write report to a file."),
 ):
     """
-    Generate a text or HTML audit report.
+    Generate a RuneGuard audit report.
     """
+    if html:
+        report_format = "html"
+    if report_format not in {"markdown", "html", "json"}:
+        typer.echo("Format must be one of: markdown, html, json.", err=True)
+        raise typer.Exit(2)
+
     try:
-        summary = summarize_audit_log(audit_log)
+        report_data = build_report(logfile)
     except FileNotFoundError:
-        typer.echo(f"Audit log not found: {audit_log}. Fix: pass an existing .runeguard/audit.jsonl path.", err=True)
+        typer.echo(f"Audit log not found: {logfile}. Fix: pass an existing .runeguard/audit.jsonl path.", err=True)
         raise typer.Exit(1)
     except json.JSONDecodeError as exc:
         typer.echo(f"Invalid JSONL audit log at line {exc.lineno}: {exc.msg}. Fix: remove malformed lines or regenerate the audit log.", err=True)
         raise typer.Exit(2)
 
-    rendered = render_summary_html(summary) if html else render_summary_text(summary)
+    if report_format == "html":
+        rendered = render_report_html(report_data)
+    elif report_format == "json":
+        rendered = render_report_json(report_data)
+    else:
+        rendered = render_report_markdown(report_data)
+
     if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(rendered, encoding="utf-8")
         typer.echo(f"Wrote report: {output}")
         return
@@ -577,8 +604,14 @@ def mcp_serve(
     RuneGuardMCPServer(loaded, audit_log=audit_log).serve()
 
 
-def _run_subprocess(command: str, argv: list[str], env: dict[str, str] | None = None) -> int:
-    completed = subprocess.run(argv, check=False, env=env)
+def _run_subprocess(
+    command: str,
+    argv: list[str],
+    *,
+    policy_obj: Policy,
+    env: dict[str, str] | None = None,
+) -> int:
+    completed = subprocess.run(argv, check=False, env=filter_child_env(policy_obj, env))
     return completed.returncode
 
 
