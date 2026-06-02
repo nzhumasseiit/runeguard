@@ -13,26 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Run AI agent with RuneGuard
+        uses: runeguard/action@v1
         with:
-          python-version: "3.12"
-      - name: Install RuneGuard
-        run: |
-          if [ -f pyproject.toml ]; then
-            python -m pip install -e .
-          else
-            python -m pip install runeguard
-          fi
-      - name: Check RuneGuard policy
-        run: runeguard check
-      - name: Scan repository
-        run: runeguard scan --json .
-      - name: Upload RuneGuard audit log
-        if: always() && hashFiles('.runeguard/audit.jsonl') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: runeguard-audit
-          path: .runeguard/audit.jsonl
+          command: YOUR_AGENT_COMMAND_HERE
+          profile: ci
 """
 
 
