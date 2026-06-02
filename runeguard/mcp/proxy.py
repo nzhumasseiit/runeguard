@@ -20,6 +20,26 @@ from ..policy import Policy
 from ..redaction import redact_value
 
 
+# Exact tool names and prefixes that indicate a file-read operation.
+# Substring matching ("read" in name) is intentionally avoided — it causes
+# false positives on tool names like thread_read, spread, breadcrumb.
+_READ_TOOL_NAMES = frozenset({
+    "read_file", "readfile", "read", "cat",
+    "resources/read", "get_file_contents",
+    "fetch_file", "load_file", "open_file",
+    "view_file", "show_file", "display_file",
+})
+_READ_TOOL_PREFIXES = ("read_", "fetch_file", "get_file", "load_file", "open_file")
+
+# Same principle for write operations.
+_WRITE_TOOL_NAMES = frozenset({
+    "write_file", "writefile", "write", "save_file", "save",
+    "put_file", "store_file", "create_file",
+    "append_file", "edit_file", "patch_file", "update_file",
+})
+_WRITE_TOOL_PREFIXES = ("write_", "save_file", "create_file", "edit_file", "append_file", "patch_file", "update_file")
+
+
 class MCPPolicyProxy:
     """Transparent MCP proxy that enforces RuneGuard policy on tool calls."""
 
@@ -90,8 +110,9 @@ class MCPPolicyProxy:
                 should_forward, blocked_response = checked
                 if not should_forward and blocked_response is not None:
                     encoded = json.dumps(blocked_response).encode("utf-8") + b"\n"
-                    await loop.run_in_executor(None, sys.stdout.buffer.write, encoded)
-                    await loop.run_in_executor(None, sys.stdout.buffer.flush)
+                    await loop.run_in_executor(
+                        None, lambda b=encoded: (sys.stdout.buffer.write(b), sys.stdout.buffer.flush())
+                    )
                     continue
 
             writer.write(line)
@@ -109,13 +130,36 @@ class MCPPolicyProxy:
             if not line:
                 break
 
-            await loop.run_in_executor(None, writer.write, line)
-            await loop.run_in_executor(None, writer.flush)
+            await loop.run_in_executor(None, lambda l=line: (writer.write(l), writer.flush()))
+
+    # Methods we actively policy-check.
+    _CHECKED_METHODS = frozenset({
+        "tools/list", "tools/call",
+        "resources/list", "resources/read",
+        "sampling/createMessage",
+        "prompts/list", "prompts/get",
+    })
+    # Methods that are notifications (no response expected, always forward).
+    _NOTIFICATION_PREFIX = "notifications/"
 
     def check_client_message(self, msg: dict) -> tuple[bool, dict | None] | None:
         """Return forwarding decision and optional JSON-RPC response."""
         method = msg.get("method")
-        if method not in {"tools/list", "tools/call", "resources/list", "resources/read"}:
+        if not isinstance(method, str):
+            return None
+
+        # Notifications are fire-and-forget; never block, never respond.
+        if method.startswith(self._NOTIFICATION_PREFIX):
+            return None
+
+        # Unknown methods: log a warning so they appear in the audit trail,
+        # then forward. Don't block — the MCP spec is evolving.
+        if method not in self._CHECKED_METHODS:
+            self._log(
+                method,
+                Decision(DecisionType.ALLOW, f"unrecognized MCP method forwarded: {method}"),
+                {"server_name": self.server_name, "warning": "method not in policy check list"},
+            )
             return None
 
         server_decision = self.policy.decide("mcp_server", server_name=self.server_name)
@@ -123,15 +167,25 @@ class MCPPolicyProxy:
         if server_decision.type in (DecisionType.BLOCK, DecisionType.REQUIRE_APPROVAL):
             return False, self._error(msg, server_decision, "mcp_server")
 
-        if method in {"tools/list", "resources/list"}:
+        if method in {"tools/list", "resources/list", "prompts/list"}:
             self._log(method, Decision(DecisionType.ALLOW, "MCP list request allowed"), {"server_name": self.server_name})
             return True, None
 
-        if method == "resources/read":
+        if method in {"resources/read", "prompts/get"}:
             decision = self._resource_read_decision(msg)
-            self._log("resources/read", decision, self._params(msg))
+            self._log(method, decision, self._params(msg))
             if decision.type in (DecisionType.BLOCK, DecisionType.REQUIRE_APPROVAL):
-                return False, self._error(msg, decision, "resources/read")
+                return False, self._error(msg, decision, method)
+            return True, None
+
+        if method == "sampling/createMessage":
+            # Log sampling requests for audit visibility; allow by default.
+            # Future: add a policy key to block sampling on sensitive servers.
+            self._log(
+                "sampling/createMessage",
+                Decision(DecisionType.ALLOW, "MCP sampling request logged"),
+                {"server_name": self.server_name, "params": redact_value(self._params(msg))},
+            )
             return True, None
 
         decision = self._tool_call_decision(msg)
@@ -249,12 +303,12 @@ class MCPPolicyProxy:
         return ""
 
     def _looks_like_read(self, tool_name: str) -> bool:
-        normalized = tool_name.lower()
-        return normalized in {"read_file", "resources/read"} or "read" in normalized or "cat" in normalized
+        n = tool_name.lower()
+        return n in _READ_TOOL_NAMES or n.startswith(_READ_TOOL_PREFIXES)
 
     def _looks_like_write(self, tool_name: str) -> bool:
-        normalized = tool_name.lower()
-        return normalized in {"write_file"} or any(token in normalized for token in ("write", "create", "append", "edit"))
+        n = tool_name.lower()
+        return n in _WRITE_TOOL_NAMES or n.startswith(_WRITE_TOOL_PREFIXES)
 
     def _is_writable(self, path: str) -> bool:
         normalized = path.replace("\\", "/").lstrip("./")
