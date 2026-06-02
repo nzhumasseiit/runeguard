@@ -37,6 +37,12 @@ SYS_PTRACE = 101
 SYS_KEXEC_LOAD = 246
 SYS_REBOOT = 169
 SYS_MOUNT = 165
+SYS_SOCKET = 41
+SYS_CONNECT = 42
+SYS_ACCEPT = 43
+SYS_ACCEPT4 = 288
+SYS_BIND = 49
+SYS_LISTEN = 50
 
 
 def _bpf_stmt(code: int, k: int) -> bytes:
@@ -79,9 +85,11 @@ class SeccompFilter:
     """
     Builds and applies a seccomp-BPF filter.
 
-    v1 blocks a small hardcoded syscall set that coding agents should not need:
-    ptrace, kexec_load, reboot, and mount. Fine-grained path/command policy is
-    still handled by RuneGuard proxy/shim/daemon layers.
+    v1 blocks a small syscall-class set that coding agents should not need:
+    ptrace, kexec_load, reboot, and mount. When policy network is denied, it
+    also blocks basic network syscalls. Classic seccomp cannot inspect pathname
+    strings; path policy belongs in Docker, Landlock, preload, or future
+    seccomp user notification / eBPF LSM integrations.
     """
 
     def __init__(self, policy: Policy):
@@ -89,6 +97,15 @@ class SeccompFilter:
 
     def build(self) -> bytes:
         dangerous_syscalls = [SYS_PTRACE, SYS_KEXEC_LOAD, SYS_REBOOT, SYS_MOUNT]
+        if self.policy.network in {"deny", "deny_all", "none"}:
+            dangerous_syscalls.extend([
+                SYS_SOCKET,
+                SYS_CONNECT,
+                SYS_ACCEPT,
+                SYS_ACCEPT4,
+                SYS_BIND,
+                SYS_LISTEN,
+            ])
         return b"".join(self._linear_block_filter(dangerous_syscalls))
 
     def apply(self) -> None:

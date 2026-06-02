@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "local-files": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "."],
+      "env": {
+        "GITHUB_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyzABCDE"
+      }
+    }
+  }
+}

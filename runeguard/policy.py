@@ -28,6 +28,10 @@ class PolicyConfig:
     require_approval: list[str] = field(default_factory=list)
     allowed_env_vars: list[str] = field(default_factory=list)
     env_var_strip_pattern: list[str] = field(default_factory=list)
+    allowed_mcp_servers: list[str] = field(default_factory=list)
+    denied_mcp_servers: list[str] = field(default_factory=list)
+    allowed_mcp_tools: list[str] = field(default_factory=list)
+    denied_mcp_tools: list[str] = field(default_factory=list)
     max_file_size_mb: int = 10
     opa_policy: str = ""
     opa_query: str = "data.runeguard.allow"
@@ -69,6 +73,10 @@ class Policy:
         self.require_approval = self.config.require_approval
         self.allowed_env_vars = self.config.allowed_env_vars
         self.env_var_strip_pattern = self.config.env_var_strip_pattern
+        self.allowed_mcp_servers = self.config.allowed_mcp_servers
+        self.denied_mcp_servers = self.config.denied_mcp_servers
+        self.allowed_mcp_tools = self.config.allowed_mcp_tools
+        self.denied_mcp_tools = self.config.denied_mcp_tools
         self.max_file_size_mb = self.config.max_file_size_mb
         self.opa_policy = self.config.opa_policy
         self.opa_query = self.config.opa_query
@@ -150,6 +158,18 @@ class Policy:
                     DecisionType.BLOCK,
                     f"domain not allowlisted: {domain}",
                 )
+
+        if tool_name in {"mcp_server", "mcp_tool"}:
+            server_name = kwargs.get("server_name") or kwargs.get("server") or ""
+            mcp_tool_name = kwargs.get("tool_name") or kwargs.get("mcp_tool") or ""
+            if server_name and server_name in self.denied_mcp_servers:
+                return Decision(DecisionType.BLOCK, f"denied MCP server: {server_name}")
+            if self.allowed_mcp_servers and server_name and server_name not in self.allowed_mcp_servers:
+                return Decision(DecisionType.BLOCK, f"MCP server not allowlisted: {server_name}")
+            if self.allowed_mcp_tools and mcp_tool_name and mcp_tool_name not in self.allowed_mcp_tools:
+                return Decision(DecisionType.BLOCK, f"MCP tool not allowlisted: {mcp_tool_name}")
+            if mcp_tool_name and mcp_tool_name in self.denied_mcp_tools:
+                return Decision(DecisionType.BLOCK, f"denied MCP tool: {mcp_tool_name}")
 
         return Decision(DecisionType.ALLOW, "allowed by policy")
 
@@ -307,6 +327,10 @@ class Policy:
             "require_approval": self.require_approval,
             "allowed_env_vars": self.allowed_env_vars,
             "env_var_strip_pattern": self.env_var_strip_pattern,
+            "allowed_mcp_servers": self.allowed_mcp_servers,
+            "denied_mcp_servers": self.denied_mcp_servers,
+            "allowed_mcp_tools": self.allowed_mcp_tools,
+            "denied_mcp_tools": self.denied_mcp_tools,
         }
 
         for name, value in fields.items():
@@ -358,6 +382,7 @@ def normalize_policy_mapping(data: dict) -> dict:
         and "shell" not in data
         and "policy" not in data
         and "opa" not in data
+        and "mcp" not in data
     ):
         return data
 
@@ -367,6 +392,7 @@ def normalize_policy_mapping(data: dict) -> dict:
     network = _section(data, "network")
     shell = _section(data, "shell")
     opa = _section(data, "opa")
+    mcp = _section(data, "mcp")
 
     return {
         "version": data.get("version", 1),
@@ -384,6 +410,10 @@ def normalize_policy_mapping(data: dict) -> dict:
         "require_approval": data.get("require_approval", []),
         "allowed_env_vars": data.get("allowed_env_vars", []),
         "env_var_strip_pattern": data.get("env_var_strip_pattern", []),
+        "allowed_mcp_servers": mcp.get("allow_servers", data.get("allowed_mcp_servers", [])),
+        "denied_mcp_servers": mcp.get("deny_servers", data.get("denied_mcp_servers", [])),
+        "allowed_mcp_tools": mcp.get("allow_tools", data.get("allowed_mcp_tools", [])),
+        "denied_mcp_tools": mcp.get("deny_tools", data.get("denied_mcp_tools", [])),
         "max_file_size_mb": data.get("max_file_size_mb", 10),
         "opa_policy": opa.get("policy", data.get("opa_policy", "")),
         "opa_query": opa.get("query", data.get("opa_query", "data.runeguard.allow")),

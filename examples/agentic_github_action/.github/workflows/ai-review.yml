@@ -1,0 +1,14 @@
+name: AI Review Example
+
+on:
+  issue_comment:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python scripts/ai_review.py "${{ github.event.comment.body }}"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

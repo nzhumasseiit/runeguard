@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .audit import audit_record
 from .decision import DecisionType
+from .redaction import redact_value
 
 try:
     from rich.console import Console
@@ -42,10 +43,10 @@ def log_decision(
         return
 
     if json_logs:
-        print(json.dumps(record, sort_keys=True))
+        print(json.dumps(redact_value(record), sort_keys=True))
         return
 
-    msg = f"[{decision.type.value}] {tool_name}({kwargs}) - {decision.reason}"
+    msg = f"[{decision.type.value}] {tool_name}({redact_value(kwargs)}) - {redact_value(decision.reason)}"
 
     if console:
         if decision.type == DecisionType.ALLOW:
@@ -83,7 +84,7 @@ def write_audit_record(path: str | Path, record: dict):
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     with destination.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, sort_keys=True))
+        f.write(json.dumps(redact_value(record), sort_keys=True))
         f.write("\n")
 
 
@@ -117,3 +118,4 @@ def _rule_from_reason(reason: str) -> str | None:
         return matched
 
     return None
+

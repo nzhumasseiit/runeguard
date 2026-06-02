@@ -4,11 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_SHIM_PATH = Path(__file__).resolve().parents[1] / "shim" / "rg_preload.so"
+
+
 @dataclass(frozen=True)
 class InterceptorConfig:
-    shim_path: Path = Path("runeguard/shim/rg_preload.so")
+    shim_path: Path = DEFAULT_SHIM_PATH
     socket_path: str = "/tmp/runeguard.sock"
     policy_path: str = "policies/default.yaml"
+    audit_log: str | None = None
     fail_closed: bool = True
 
 
@@ -37,5 +41,7 @@ class RuneGuardInterceptor:
         env["LD_PRELOAD"] = " ".join(preload_entries)
         env["RUNEGUARD_SOCKET"] = self.config.socket_path
         env["RUNEGUARD_POLICY"] = self.config.policy_path
+        if self.config.audit_log:
+            env["RUNEGUARD_AUDIT"] = self.config.audit_log
         env["RUNEGUARD_FAIL_CLOSED"] = "1" if self.config.fail_closed else "0"
         return env

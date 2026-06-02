@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 
 from .correlation import current_turn
+from .redaction import redact_value
 
 
 def audit_record(
@@ -47,7 +48,7 @@ def summarize_audit_log(path: str | Path) -> dict:
             if not line:
                 continue
 
-            record = json.loads(line)
+            record = redact_value(json.loads(line))
             total += 1
             decision = str(record.get("decision", "")).lower()
 
@@ -243,7 +244,50 @@ def render_report_html(report: dict) -> str:
 
 
 def render_report_json(report: dict) -> str:
-    return json.dumps(report, indent=2, sort_keys=True)
+    return json.dumps(redact_value(report), indent=2, sort_keys=True)
+
+
+def render_pr_summary_markdown(report: dict) -> str:
+    summary = report["summary"]
+    blocked = [
+        event for event in report["events"]
+        if _normalize_decision(str(event.get("decision", "audit"))) == "block"
+    ]
+    domains = sorted({
+        str(event.get("reason", "")).split(": ", 1)[1]
+        for event in blocked
+        if str(event.get("reason", "")).startswith("domain not allowlisted: ")
+    })
+    written = sorted({
+        str(event.get("path"))
+        for event in report["events"]
+        if event.get("tool_call") in {"write_file", "write", "openat"} and event.get("path")
+    })
+    commands = sorted({
+        str(event.get("command"))
+        for event in report["events"]
+        if event.get("command")
+    })
+
+    lines = [
+        "## RuneGuard PR Summary",
+        "",
+        f"- Total events: {summary['total_events']}",
+        f"- Blocked actions: {summary['blocked_count']}",
+        f"- Allowed actions: {summary['decision_counts']['allow']}",
+        f"- Domains blocked/contacted: {', '.join(domains) if domains else 'none recorded'}",
+        f"- Files written: {', '.join(written) if written else 'none recorded'}",
+        "",
+        "### Commands",
+    ]
+    lines.extend(f"- `{_md(command)}`" for command in commands) if commands else lines.append("- none recorded")
+    lines.append("")
+    lines.append("### Review Before Merging")
+    if blocked:
+        lines.extend(f"- Blocked `{event.get('tool_call')}`: {_md(str(event.get('reason') or 'unknown'))}" for event in blocked[:10])
+    else:
+        lines.append("- No blocked actions recorded.")
+    return "\n".join(redact_value(lines))
 
 
 def render_summary_text(summary: dict) -> str:
@@ -323,7 +367,7 @@ def _read_jsonl(path: str | Path) -> list[dict]:
             line = line.strip()
             if not line:
                 continue
-            events.append(json.loads(line))
+            events.append(redact_value(json.loads(line)))
     return events
 
 

