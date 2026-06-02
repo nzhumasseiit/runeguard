@@ -1,8 +1,11 @@
+import asyncio
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
@@ -171,3 +174,18 @@ def _recv(process):
     line = process.stdout.readline()
     assert line, process.stderr.read()
     return json.loads(line)
+
+
+def test_proxy_upstream_not_found(tmp_path):
+    """MCPPolicyProxy.run() raises RuntimeError with a clear message when the upstream command doesn't exist."""
+    from runeguard.mcp.proxy import MCPPolicyProxy
+    from runeguard.policy import Policy
+
+    proxy = MCPPolicyProxy(
+        Policy({}),
+        ["/nonexistent-binary-runeguard-test"],
+        audit_log=str(tmp_path / "audit.jsonl"),
+    )
+
+    with pytest.raises(RuntimeError, match="MCP server executable not found"):
+        asyncio.run(proxy.run())
