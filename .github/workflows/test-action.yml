@@ -1,0 +1,71 @@
+name: Test GitHub Action
+
+on:
+  push:
+    paths:
+      - action.yml
+      - scripts/action-entrypoint.sh
+      - tests/test_action_entrypoint.py
+      - ".github/workflows/test-action.yml"
+  pull_request:
+    paths:
+      - action.yml
+      - scripts/action-entrypoint.sh
+      - tests/test_action_entrypoint.py
+
+jobs:
+  test-action-unit:
+    name: Unit tests (entrypoint logic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .[dev]
+      - run: pytest tests/test_action_entrypoint.py -v
+
+  test-action-integration:
+    name: Integration (action wrapping a safe command)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run safe echo command through action
+        id: safe
+        uses: ./
+        with:
+          command: echo "hello from RuneGuard"
+          profile: ci
+          audit-log: .runeguard/test-safe.jsonl
+
+      - name: Verify no blocks
+        run: |
+          if [ "${{ steps.safe.outputs.blocked }}" = "true" ]; then
+            echo "Unexpected block on safe command"
+            exit 1
+          fi
+
+  test-action-blocks-env:
+    name: Integration (action blocks .env read)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "SECRET=hunter2" > .env
+
+      - name: Attempt to read .env (should be blocked)
+        id: blocked_run
+        uses: ./
+        with:
+          command: cat .env
+          profile: ci
+          fail-on-block: "false"
+          audit-log: .runeguard/test-block.jsonl
+
+      - name: Verify block was recorded
+        run: |
+          if [ "${{ steps.blocked_run.outputs.blocked }}" != "true" ]; then
+            echo "Expected .env read to be blocked but it was not"
+            exit 1
+          fi
+          echo "Block count: ${{ steps.blocked_run.outputs.block-count }}"

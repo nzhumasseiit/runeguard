@@ -32,6 +32,7 @@ dev = [
 Homepage = "https://github.com/nzhumasseiit/runeguard"
 Repository = "https://github.com/nzhumasseiit/runeguard"
 Issues = "https://github.com/nzhumasseiit/runeguard/issues"
+"GitHub Action" = "https://github.com/marketplace/actions/runeguard"
 
 [project.scripts]
 runeguard = "runeguard.cli:app"

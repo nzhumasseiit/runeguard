@@ -1,0 +1,106 @@
+name: RuneGuard
+description: Runtime policy enforcement for AI coding agents in CI
+author: RuneGuard
+
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  command:
+    description: Shell command to run under RuneGuard policy enforcement
+    required: true
+  policy:
+    description: Path to a runeguard.yaml policy file in the repo. If empty, uses the profile.
+    required: false
+    default: ""
+  profile:
+    description: Named policy profile (ci, strict, permissive). Used when policy is empty.
+    required: false
+    default: ci
+  audit-log:
+    description: Path for the JSONL audit log file
+    required: false
+    default: .runeguard/audit.jsonl
+  upload-audit:
+    description: Upload audit log as a GitHub Actions artifact
+    required: false
+    default: "true"
+  artifact-name:
+    description: Artifact name for the uploaded audit log
+    required: false
+    default: runeguard-audit
+  backend:
+    description: Sandbox backend. host=no Docker required. docker=stronger isolation.
+    required: false
+    default: host
+  fail-on-block:
+    description: Fail the step if RuneGuard blocked any action
+    required: false
+    default: "true"
+  runeguard-version:
+    description: Pin a specific RuneGuard version (e.g. 0.1.0). Empty = latest.
+    required: false
+    default: ""
+  python-version:
+    description: Python version used to install RuneGuard
+    required: false
+    default: "3.12"
+
+outputs:
+  blocked:
+    description: '"true" if RuneGuard blocked at least one action'
+    value: ${{ steps.run.outputs.blocked }}
+  audit-log-path:
+    description: Resolved path to the audit log file
+    value: ${{ steps.run.outputs.audit_log_path }}
+  block-count:
+    description: Number of blocked actions
+    value: ${{ steps.run.outputs.block_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install RuneGuard
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.runeguard-version }}" ]; then
+          pip install --quiet "runeguard==${{ inputs.runeguard-version }}"
+        else
+          pip install --quiet runeguard
+        fi
+
+    - name: Validate policy
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.policy }}" ]; then
+          runeguard check --policy "${{ inputs.policy }}"
+        else
+          echo "Using built-in profile: ${{ inputs.profile }}"
+        fi
+
+    - name: Run with RuneGuard
+      id: run
+      shell: bash
+      run: ${{ github.action_path }}/scripts/action-entrypoint.sh
+      env:
+        RG_COMMAND: ${{ inputs.command }}
+        RG_POLICY: ${{ inputs.policy }}
+        RG_PROFILE: ${{ inputs.profile }}
+        RG_AUDIT_LOG: ${{ inputs.audit-log }}
+        RG_BACKEND: ${{ inputs.backend }}
+        RG_FAIL_ON_BLOCK: ${{ inputs.fail-on-block }}
+        GITHUB_OUTPUT: ${{ env.GITHUB_OUTPUT }}
+
+    - name: Upload audit log
+      if: ${{ inputs.upload-audit == 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.audit-log }}
+        if-no-files-found: ignore

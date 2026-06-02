@@ -55,9 +55,9 @@ def test_ci_init_generates_github_workflow(tmp_path):
     workflow = initialize_github_ci(tmp_path)
     text = workflow.read_text(encoding="utf-8")
 
-    assert "runeguard check" in text
-    assert "runeguard scan --json" in text
-    assert "actions/upload-artifact" in text
+    assert "runeguard/action@v1" in text
+    assert "command: YOUR_AGENT_COMMAND_HERE" in text
+    assert "profile: ci" in text
 
 
 def test_diff_risk_detects_sensitive_changes():
