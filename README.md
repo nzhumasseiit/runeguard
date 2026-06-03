@@ -11,7 +11,7 @@ runeguard demo
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nzhumasseiit/runeguard)
 
-> **v1.1.0 is an early alpha.** The policy engine, Docker sandbox, demo, and the
+> **v1.1.2 is an early alpha.** The policy engine, Docker sandbox, demo, and the
 > tamper-evident audit layer are usable today; the Linux kernel paths (eBPF,
 > Landlock, LD_PRELOAD shim) are experimental and platform-dependent. This
 > README tries to claim only what the code actually does - if you find a place
