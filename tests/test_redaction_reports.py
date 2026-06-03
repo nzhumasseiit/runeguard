@@ -1,6 +1,7 @@
 import json
 
 from runeguard.audit import build_report, render_pr_summary_markdown, render_report_json
+from runeguard.audit_logging import write_audit_record as audit_logging_write_audit_record
 from runeguard.logger import write_audit_record
 from runeguard.redaction import redact_text
 
@@ -14,6 +15,10 @@ def test_redact_text_handles_common_tokens():
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in redacted
     assert "ghp_...BCDE" in redacted
     assert "sk-...3456" in redacted
+
+
+def test_audit_logging_compat_module_exports_writer():
+    assert audit_logging_write_audit_record is write_audit_record
 
 
 def test_audit_reports_redact_secrets(tmp_path):
