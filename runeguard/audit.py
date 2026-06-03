@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 
 from .correlation import current_turn
+from .integrity import unwrap_payload
 from .redaction import redact_value
 
 
@@ -48,7 +49,7 @@ def summarize_audit_log(path: str | Path) -> dict:
             if not line:
                 continue
 
-            record = redact_value(json.loads(line))
+            record = redact_value(unwrap_payload(json.loads(line)))
             total += 1
             decision = str(record.get("decision", "")).lower()
 
@@ -367,7 +368,7 @@ def _read_jsonl(path: str | Path) -> list[dict]:
             line = line.strip()
             if not line:
                 continue
-            events.append(redact_value(json.loads(line)))
+            events.append(redact_value(unwrap_payload(json.loads(line))))
     return events
 
 

@@ -2,6 +2,7 @@ import json
 
 from runeguard.correlation import agent_turn
 from runeguard.decision import Decision, DecisionType
+from runeguard.integrity import unwrap_payload
 from runeguard.logger import decision_record, write_audit_record
 
 
@@ -29,7 +30,7 @@ def test_audit_log_preserves_run_id(tmp_path):
             decision_record("read_file", Decision(DecisionType.BLOCK, "blocked"), {"path": ".env"}),
         )
 
-    record = json.loads(audit_log.read_text(encoding="utf-8"))
+    record = unwrap_payload(json.loads(audit_log.read_text(encoding="utf-8")))
     assert record["run_id"] == "turn-2"
     assert record["agent"] == "fake-agent"
     assert "correlation" not in record

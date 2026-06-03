@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .audit import audit_record
 from .decision import DecisionType
+from .integrity import TamperEvidentLog, load_key
 from .redaction import redact_value
 
 try:
@@ -80,12 +81,7 @@ def decision_record(
 
 
 def write_audit_record(path: str | Path, record: dict):
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    with destination.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(redact_value(record), sort_keys=True))
-        f.write("\n")
+    TamperEvidentLog(path, key=load_key()).append(redact_value(record))
 
 
 def _command_from_kwargs(kwargs: dict) -> str | None:
@@ -118,4 +114,3 @@ def _rule_from_reason(reason: str) -> str | None:
         return matched
 
     return None
-

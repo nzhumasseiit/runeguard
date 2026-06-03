@@ -3,6 +3,7 @@ import json
 import pytest
 
 from runeguard.agents.openai_codex import GuardedToolkit, runeguard_tool
+from runeguard.integrity import unwrap_payload
 from runeguard.policy import Policy
 
 
@@ -35,7 +36,7 @@ def test_runeguard_tool_allows_call_and_writes_audit_log(tmp_path):
 
     assert shell(command="echo hello") == "ran: echo hello"
 
-    record = json.loads(audit_log.read_text(encoding="utf-8"))
+    record = unwrap_payload(json.loads(audit_log.read_text(encoding="utf-8")))
     assert record["tool_call"] == "shell"
     assert record["command"] == "echo hello"
     assert record["decision"] == "allow"
@@ -72,7 +73,7 @@ def test_guarded_toolkit_wraps_tools_for_openai_use(tmp_path):
         toolkit.definitions[1](command="curl https://example.com")
 
     records = [
-        json.loads(line)
+        unwrap_payload(json.loads(line))
         for line in audit_log.read_text(encoding="utf-8").splitlines()
     ]
     assert [record["decision"] for record in records] == ["allow", "block"]

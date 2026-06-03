@@ -25,6 +25,7 @@ from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
 from .diff_risk import analyze_diff_text, analyze_git_diff, render_diff_risk
 from .ebpf import EbpfConfig, EbpfTracer
+from .integrity import load_key, verify_log
 from .logger import decision_record
 from .mcp.inspect import inspect_mcp_config, render_mcp_inspection
 from .mcp.proxy import run_proxy
@@ -536,6 +537,36 @@ def audit_summary(audit_log: Path = typer.Argument(..., help="Path to a RuneGuar
         raise typer.Exit(2)
 
     typer.echo(render_summary_text(summary))
+
+
+@audit_app.command("verify")
+def audit_verify(
+    audit_log: Path = typer.Argument(..., help="Path to a RuneGuard JSONL audit log."),
+    expected_head: str | None = typer.Option(
+        None,
+        "--expected-head",
+        help="Externally anchored head hash used to detect tail truncation.",
+    ),
+):
+    """
+    Verify a tamper-evident RuneGuard audit log.
+    """
+    try:
+        result = verify_log(audit_log, key=load_key(), expected_head=expected_head)
+    except FileNotFoundError:
+        typer.echo(f"Audit log not found: {audit_log}. Fix: pass an existing .runeguard/audit.jsonl path.", err=True)
+        raise typer.Exit(1)
+    except ValueError as exc:
+        typer.echo(f"Invalid audit key: {exc}. Fix: set RUNEGUARD_AUDIT_KEY to hex or RUNEGUARD_AUDIT_KEYFILE to raw key bytes.", err=True)
+        raise typer.Exit(2)
+
+    if result.ok:
+        typer.echo(f"OK: {result.count} records, head {result.head_hash}")
+        return
+
+    where = f" at seq {result.break_seq}" if result.break_seq is not None else ""
+    typer.echo(f"TAMPER DETECTED{where}: {result.error}", err=True)
+    raise typer.Exit(1)
 
 
 @app.command()

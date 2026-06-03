@@ -7,6 +7,7 @@ import pytest
 
 from runeguard.audit import summarize_audit_log
 from runeguard.decision import Decision, DecisionType
+from runeguard.integrity import unwrap_payload
 from runeguard.logger import log_decision
 from runeguard.policy import Policy
 
@@ -160,7 +161,7 @@ def test_audit_log_uses_fixed_schema_without_payload_values(tmp_path):
         quiet=True,
     )
 
-    record = json.loads(audit_log.read_text(encoding="utf-8"))
+    record = unwrap_payload(json.loads(audit_log.read_text(encoding="utf-8")))
     assert set(record) == {
         "run_id",
         "agent",

@@ -5,13 +5,14 @@ These tests exercise the Python-side helpers used by action-entrypoint.sh.
 The shell script itself is tested with the integration workflow.
 """
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from runeguard.integrity import TamperEvidentLog
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -94,11 +95,7 @@ def test_entrypoint_blocks_protected_path(tmp_path):
 def test_entrypoint_fail_on_block_false_does_not_fail(tmp_path):
     """fail-on-block=false: step exits 0 even if something was blocked."""
     audit = tmp_path / "audit.jsonl"
-    # Write a fake audit log with a block entry
-    audit.write_text(
-        json.dumps({"decision": "block", "tool": "read_file", "reason": "test"}) + "\n",
-        encoding="utf-8",
-    )
+    TamperEvidentLog(audit).append({"decision": "block", "tool": "read_file", "reason": "test"})
 
     env = {
         **os.environ,
@@ -123,6 +120,37 @@ def test_entrypoint_fail_on_block_false_does_not_fail(tmp_path):
     assert result.returncode == 0, result.stderr
     output_text = Path(env["GITHUB_OUTPUT"]).read_text()
     assert "blocked=true" in output_text
+
+
+def test_entrypoint_counts_chained_audit_blocks(tmp_path):
+    """Hash-chained compact JSONL still reports block counts."""
+    audit = tmp_path / "audit.jsonl"
+    TamperEvidentLog(audit).append({"decision": "block", "tool": "read_file", "reason": "test"})
+
+    env = {
+        **os.environ,
+        "RG_COMMAND": "echo ok",
+        "RG_POLICY": "",
+        "RG_PROFILE": "ci",
+        "RG_AUDIT_LOG": str(audit),
+        "RG_BACKEND": "host",
+        "RG_FAIL_ON_BLOCK": "false",
+        "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    Path(env["GITHUB_OUTPUT"]).touch()
+
+    result = subprocess.run(
+        [str(ENTRYPOINT)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    output_text = Path(env["GITHUB_OUTPUT"]).read_text()
+    assert "blocked=true" in output_text
+    assert "block_count=1" in output_text
 
 
 def test_entrypoint_outputs_audit_log_path(tmp_path):

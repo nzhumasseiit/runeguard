@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from runeguard.integrity import unwrap_payload
+
 
 TEST_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = TEST_ROOT.parents[0] if (TEST_ROOT / "cli.py").exists() else TEST_ROOT
@@ -100,8 +102,13 @@ mcp:
         process.wait(timeout=5)
 
     audit_text = audit.read_text(encoding="utf-8")
-    assert '"decision": "allow"' in audit_text
-    assert '"decision": "block"' in audit_text
+    decisions = {
+        unwrap_payload(json.loads(line))["decision"]
+        for line in audit_text.splitlines()
+        if line.strip()
+    }
+    assert "allow" in decisions
+    assert "block" in decisions
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in audit_text
 
 

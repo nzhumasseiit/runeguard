@@ -2,6 +2,7 @@ from typer.testing import CliRunner
 import json
 
 from runeguard.cli import app
+from runeguard.integrity import unwrap_payload
 
 
 try:
@@ -332,7 +333,12 @@ def test_demo_command_can_write_audit_log(tmp_path):
 
     assert result.exit_code == 0
     assert audit_path.exists()
-    assert '"decision": "block"' in audit_path.read_text(encoding="utf-8")
+    decisions = [
+        unwrap_payload(json.loads(line))["decision"]
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert "block" in decisions
 
 
 def test_daemon_status_reports_missing_socket(tmp_path):

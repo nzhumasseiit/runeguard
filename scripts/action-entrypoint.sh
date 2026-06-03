@@ -34,7 +34,41 @@ set -e
 # Parse audit log for block count
 BLOCK_COUNT=0
 if [ -f "$RG_AUDIT_LOG" ]; then
-  BLOCK_COUNT=$(grep -c '"decision": "block"' "$RG_AUDIT_LOG" 2>/dev/null || echo 0)
+  if python - "$RG_AUDIT_LOG" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        sys.exit(0 if isinstance(record, dict) and "payload" in record else 1)
+sys.exit(1)
+PY
+  then
+    runeguard audit verify "$RG_AUDIT_LOG"
+  fi
+  BLOCK_COUNT=$(python - "$RG_AUDIT_LOG" <<'PY'
+import json
+import sys
+
+count = 0
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        if isinstance(record, dict) and isinstance(record.get("payload"), dict):
+            record = record["payload"]
+        if str(record.get("decision", "")).lower() == "block":
+            count += 1
+print(count)
+PY
+)
 fi
 
 BLOCKED="false"
