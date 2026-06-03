@@ -53,50 +53,50 @@ def test_quickstart_recommends_landlock_on_linux(monkeypatch):
     assert "Linux detected. Recommended: runeguard run --backend landlock -- your-command" in result.stdout
 
 
-def test_init_creates_policy_and_state_files():
-    with runner.isolated_filesystem():
-        result = runner.invoke(app, ["init"])
+def test_init_creates_policy_and_state_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init"])
 
-        assert result.exit_code == 0
-        from pathlib import Path
+    assert result.exit_code == 0
+    from pathlib import Path
 
-        policy = Path("runeguard.yaml")
-        assert policy.exists()
-        assert Path(".runeguard").is_dir()
-        assert Path(".runeguard/audit.jsonl").exists()
-        assert Path(".runeguard/README.md").exists()
+    policy = Path("runeguard.yaml")
+    assert policy.exists()
+    assert Path(".runeguard").is_dir()
+    assert Path(".runeguard/audit.jsonl").exists()
+    assert Path(".runeguard/README.md").exists()
 
-        content = policy.read_text(encoding="utf-8")
-        assert "version: 1" in content
-        assert "backend: docker" in content
-        assert "network: deny" in content
-        assert "readonly_rootfs: true" in content
-        assert "readonly_workspace: true" in content
-        assert '    - "src/"' in content
-        assert '  - ".env"' in content
-        assert '    - "~/.ssh/**"' in content
-
-
-def test_init_refuses_to_overwrite_without_force():
-    with runner.isolated_filesystem():
-        result = runner.invoke(app, ["init"])
-        assert result.exit_code == 0
-
-        result = runner.invoke(app, ["init"])
-        assert result.exit_code == 1
-        output = result.stdout + result.stderr
-        assert "already exists" in output
+    content = policy.read_text(encoding="utf-8")
+    assert "version: 1" in content
+    assert "backend: docker" in content
+    assert "network: deny" in content
+    assert "readonly_rootfs: true" in content
+    assert "readonly_workspace: true" in content
+    assert '    - "src/"' in content
+    assert '  - ".env"' in content
+    assert '    - "~/.ssh/**"' in content
 
 
-def test_init_force_overwrites_policy():
-    with runner.isolated_filesystem():
-        from pathlib import Path
+def test_init_refuses_to_overwrite_without_force(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0
 
-        Path("runeguard.yaml").write_text("sandbox_backend: host\n", encoding="utf-8")
-        result = runner.invoke(app, ["init", "--force"])
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 1
+    output = result.stdout + result.stderr
+    assert "already exists" in output
 
-        assert result.exit_code == 0
-        assert "backend: docker" in Path("runeguard.yaml").read_text(encoding="utf-8")
+
+def test_init_force_overwrites_policy(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from pathlib import Path
+
+    Path("runeguard.yaml").write_text("sandbox_backend: host\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", "--force"])
+
+    assert result.exit_code == 0
+    assert "backend: docker" in Path("runeguard.yaml").read_text(encoding="utf-8")
 
 
 def test_doctor_passes_when_critical_requirements_exist(monkeypatch):
