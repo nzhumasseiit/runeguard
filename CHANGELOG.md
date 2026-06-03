@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.2
+
+### Fixed
+
+- PyPI publish workflow no longer fails on re-runs when a version's files already exist (`skip-existing`).
+- Synced `__version__` with the packaged release version.
+
 ## v0.1.0
 
 Initial early alpha release of RuneGuard.
