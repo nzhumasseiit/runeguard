@@ -93,5 +93,9 @@ if [ "$RG_FAIL_ON_BLOCK" = "true" ] && [ "$BLOCKED" = "true" ]; then
   exit 1
 fi
 
+if [ "$RG_FAIL_ON_BLOCK" != "true" ] && [ "$BLOCKED" = "true" ]; then
+  exit 0
+fi
+
 # Forward the agent's exit code
 exit $EXIT_CODE

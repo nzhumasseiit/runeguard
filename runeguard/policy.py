@@ -137,12 +137,20 @@ class Policy:
 
         if tool_name in {"shell", "execve"}:
             command = kwargs.get("command", "")
+            argv = kwargs.get("argv")
             for blocked in self.blocked_commands:
-                if fnmatch(command, blocked) or self._matches_command_pattern(blocked, command, kwargs.get("argv")):
+                if fnmatch(command, blocked) or self._matches_command_pattern(blocked, command, argv):
                     return Decision(
                         DecisionType.BLOCK,
                         f"blocked shell command pattern: {blocked}",
                     )
+
+            protected_arg = self._protected_shell_arg(command, argv)
+            if protected_arg:
+                return Decision(
+                    DecisionType.BLOCK,
+                    f"protected path access: {protected_arg}",
+                )
 
         if tool_name in {"http_post", "external_http_post", "connect", "socket"}:
             url = kwargs.get("url", "")
@@ -292,6 +300,19 @@ class Policy:
             return shlex.split(value)
         except ValueError:
             return value.split()
+
+    def _protected_shell_arg(
+        self,
+        command: str,
+        argv: list[str] | tuple[str, ...] | None,
+    ) -> str:
+        command_tokens = list(argv) if argv else self._split_command(command)
+        for token in command_tokens[1:]:
+            if not token or token.startswith("-"):
+                continue
+            if self._is_protected_path(token):
+                return token
+        return ""
 
     def _normalize_path(self, value: str) -> Path:
         return Path(os.path.expanduser(value)).resolve(strict=False)

@@ -71,6 +71,8 @@ runs:
       run: |
         if [ -n "${{ inputs.runeguard-version }}" ]; then
           pip install --quiet "runeguard==${{ inputs.runeguard-version }}"
+        elif [ -f "${{ github.action_path }}/pyproject.toml" ]; then
+          pip install --quiet "${{ github.action_path }}"
         else
           pip install --quiet runeguard
         fi

@@ -26,6 +26,12 @@ def test_blocks_shell_pattern():
     assert decision.type == DecisionType.BLOCK
 
 
+def test_blocks_shell_command_with_protected_path_arg():
+    policy = Policy({"protected_paths": [".env"]})
+    decision = policy.decide("shell", command="cat .env", argv=["cat", ".env"])
+    assert decision.type == DecisionType.BLOCK
+
+
 def test_blocks_protected_directory_descendant():
     policy = Policy({"protected_paths": ["secrets/"]})
     decision = policy.decide("read_file", path="project/secrets/api_key.txt")
