@@ -20,6 +20,7 @@ from .audit import (
 )
 from .agent import AgentWrapConfig, run_agent, summarize_agent_run, validate_agent_command
 from .approval import ApprovalManager, ApprovalPolicy
+from .audit_compliance import LocalWORMExporter, manifest_summary, verify_retention
 from .ci import initialize_github_ci
 from .daemon import DEFAULT_SOCKET_PATH, RuneGuardDaemon
 from .demo import run_demo
@@ -567,6 +568,48 @@ def audit_verify(
     where = f" at seq {result.break_seq}" if result.break_seq is not None else ""
     typer.echo(f"TAMPER DETECTED{where}: {result.error}", err=True)
     raise typer.Exit(1)
+
+
+@audit_app.command("manifest")
+def audit_manifest(audit_dir: Path = typer.Option(Path(".runeguard"), "--audit-dir", help="RuneGuard audit directory.")):
+    """
+    Print the audit retention manifest.
+    """
+    manifest_path = audit_dir / "audit-manifest.json"
+    if not manifest_path.exists():
+        typer.echo(f"Audit manifest not found: {manifest_path}. Fix: write or rotate audit logs first.", err=True)
+        raise typer.Exit(1)
+    typer.echo(json.dumps(manifest_summary(audit_dir), indent=2, sort_keys=True))
+
+
+@audit_app.command("verify-retention")
+def audit_verify_retention(audit_dir: Path = typer.Option(Path(".runeguard"), "--audit-dir", help="RuneGuard audit directory.")):
+    """
+    Verify audit manifest, segment integrity, segment continuity, and retention status.
+    """
+    result = verify_retention(audit_dir, key=load_key())
+    if result.ok:
+        typer.echo(f"OK: retention verified for {result.checked_segments} segment(s)")
+        return
+    for error in result.errors:
+        typer.echo(f"RETENTION VIOLATION: {error}", err=True)
+    raise typer.Exit(1)
+
+
+@audit_app.command("export")
+def audit_export(
+    audit_dir: Path = typer.Option(Path(".runeguard"), "--audit-dir", help="RuneGuard audit directory."),
+    destination: Path = typer.Option(..., "--destination", help="Local WORM-style export directory."),
+):
+    """
+    Export closed audit segments and manifest snapshots to a local WORM-style directory.
+    """
+    try:
+        receipts = LocalWORMExporter().export(audit_dir, destination)
+    except FileExistsError as exc:
+        typer.echo(f"Export refused: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Exported {len(receipts)} object(s) to {destination}")
 
 
 @app.command()

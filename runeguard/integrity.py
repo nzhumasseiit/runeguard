@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -30,7 +31,31 @@ def _canonical(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _digest(seq: int, prev_hash: str, payload: dict, *, key: bytes | None) -> str:
+def _digest(
+    seq: int,
+    prev_hash: str,
+    payload: dict,
+    *,
+    key: bytes | None,
+    ts: str | None = None,
+    mode: str | None = None,
+) -> str:
+    material = b"\x00".join(
+        [
+            _DOMAIN,
+            str(seq).encode("ascii"),
+            prev_hash.encode("ascii"),
+            (ts or "").encode("utf-8"),
+            (mode or "").encode("ascii"),
+            _canonical(payload),
+        ]
+    )
+    if key is None:
+        return hashlib.sha256(material).hexdigest()
+    return hmac.new(key, material, hashlib.sha256).hexdigest()
+
+
+def _legacy_digest(seq: int, prev_hash: str, payload: dict, *, key: bytes | None) -> str:
     material = b"\x00".join(
         [_DOMAIN, str(seq).encode("ascii"), prev_hash.encode("ascii"), _canonical(payload)]
     )
@@ -77,9 +102,18 @@ class VerifyResult:
 class TamperEvidentLog:
     """Append-only, hash-chained JSONL audit log."""
 
-    def __init__(self, path: str | Path, *, key: bytes | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        key: bytes | None = None,
+        initial_seq: int = 0,
+        initial_prev_hash: str = GENESIS_PREV,
+    ) -> None:
         self.path = Path(path)
         self.key = key
+        self.initial_seq = initial_seq
+        self.initial_prev_hash = initial_prev_hash
 
     def _tail_head(self) -> ChainHead:
         last = None
@@ -91,7 +125,7 @@ class TamperEvidentLog:
                         last = line
 
         if last is None:
-            return ChainHead.genesis()
+            return ChainHead(seq=self.initial_seq - 1, hash=self.initial_prev_hash)
 
         env = json.loads(last)
         if not is_integrity_envelope(env):
@@ -108,12 +142,16 @@ class TamperEvidentLog:
             try:
                 head = self._tail_head()
                 seq = head.seq + 1
-                digest = _digest(seq, head.hash, payload, key=self.key)
+                mode = "sealed" if self.key is not None else "chain"
+                ts = datetime.now(timezone.utc).isoformat()
+                digest = _digest(seq, head.hash, payload, key=self.key, ts=ts, mode=mode)
                 envelope = {
                     "seq": seq,
+                    "ts": ts,
                     "prev_hash": head.hash,
                     "payload": payload,
                     "hash": digest,
+                    "mode": mode,
                 }
                 f.write(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
                 f.write("\n")
@@ -138,9 +176,11 @@ def verify_log(
     *,
     key: bytes | None = None,
     expected_head: str | None = None,
+    expected_start_seq: int = 0,
+    expected_prev_hash: str = GENESIS_PREV,
 ) -> VerifyResult:
-    prev_hash = GENESIS_PREV
-    expected_seq = 0
+    prev_hash = expected_prev_hash
+    expected_seq = expected_start_seq
     count = 0
     head: str | None = None
 
@@ -171,15 +211,24 @@ def verify_log(
                 break_seq=seq,
             )
 
-        recomputed = _digest(seq, prev_hash, env["payload"], key=key)
+        recomputed = _digest(
+            seq,
+            prev_hash,
+            env["payload"],
+            key=key,
+            ts=env.get("ts"),
+            mode=env.get("mode"),
+        )
+        legacy_recomputed = _legacy_digest(seq, prev_hash, env["payload"], key=key)
         if not hmac.compare_digest(recomputed, env["hash"]):
-            return VerifyResult(
-                False,
-                count,
-                head,
-                f"seq {seq}: hash mismatch (payload altered)",
-                break_seq=seq,
-            )
+            if env.get("ts") is not None or env.get("mode") is not None or not hmac.compare_digest(legacy_recomputed, env["hash"]):
+                return VerifyResult(
+                    False,
+                    count,
+                    head,
+                    f"seq {seq}: hash mismatch (payload altered)",
+                    break_seq=seq,
+                )
 
         prev_hash = env["hash"]
         head = env["hash"]

@@ -1,7 +1,7 @@
 # RuneGuard Tamper-Evident Audit Store
 
-**Status:** implemented reference path  
-**Goal:** turn the existing plain JSONL audit log into a verifiable, tamper-evident audit trail.
+**Status:** implemented repo-local compliance path  
+**Goal:** turn the existing plain JSONL audit log into verifiable audit evidence with hash-chained records, retention manifests, safe rotation, deletion detection, and local WORM-style export.
 
 ## Why this first
 
@@ -30,12 +30,14 @@ This makes tampering detectable, not impossible.
 Each line remains one JSON object:
 
 ```json
-{"seq":2,"prev_hash":"<hash of seq 1>","payload":{ "...existing audit_record": "..." },"hash":"<digest>"}
+{"seq":2,"ts":"2026-06-03T00:00:00+00:00","prev_hash":"<hash of seq 1>","payload":{ "...existing audit_record": "..." },"hash":"<digest>","mode":"chain"}
 ```
 
 - `seq`: monotonic integer from 0.
+- `ts`: UTC write timestamp for the envelope.
 - `prev_hash`: the previous envelope hash, or `0` repeated 64 times for the first record.
 - `payload`: the existing redacted `audit_record` dictionary.
+- `mode`: `chain` for SHA-256, or `sealed` for HMAC-SHA-256 when a real key is supplied.
 - `hash`: `H(domain || seq || prev_hash || canonical(payload))`.
 
 Canonical payload serialization is `json.dumps(payload, sort_keys=True, separators=(",", ":"))`.
@@ -56,18 +58,54 @@ Dropping records from the tail leaves a shorter chain that is internally valid. 
 
 That external proof boundary is the natural paid line: "prove it to a third party."
 
+## Retention Manifest
+
+RuneGuard writes `.runeguard/audit-manifest.json` beside the audit segments. The default retention period is 180 days. Values below 180 days are rejected unless `RUNEGUARD_AUDIT_ALLOW_SHORT_RETENTION=true` is set for dev/test.
+
+Each segment entry records:
+
+- log file name
+- creation time and close/rotation time
+- first and last sequence number
+- previous segment head hash
+- current head hash
+- record count
+- file SHA-256
+- `retention_until`
+- export status
+- deletion status
+
+The manifest includes a `manifest_hash` over its contents. This is local integrity metadata, not a substitute for external anchoring.
+
+## Rotation
+
+Rotation closes the current `audit.jsonl`, renames it to a segment file such as `audit-000000000000-000000000123-<head>.jsonl`, records the final head hash in the manifest, and starts the next segment with `prev_hash` set to the previous segment head. Closed segments are marked read-only as a local best effort, but deletion prevention is not guaranteed on a writable filesystem.
+
+`runeguard audit verify-retention` verifies each segment and then verifies segment continuity through the manifest.
+
+## Local WORM-Style Export
+
+`runeguard audit export --audit-dir .runeguard --destination <dir>` copies closed segments and manifest snapshots into an export directory and writes receipt files containing exported object path, SHA-256, timestamp, segment id, and `retention_until`.
+
+Receipt files are never overwritten. This is WORM-style local evidence packaging, not real cloud WORM/Object Lock. Real S3 Object Lock or hosted receipt endpoints should sit behind the exporter interface when implemented.
+
 ## Integration Points
 
 - `runeguard.integrity`: hash-chain append and verification.
-- `logger.write_audit_record`: redacts first, then appends a chained envelope.
+- `runeguard.audit_compliance`: retention config, manifest, rotation, local WORM-style export, and retention verification.
+- `logger.write_audit_record`: redacts first, then appends a chained envelope through the compliance writer.
 - `audit` readers: unwrap `payload` when present and fall back to legacy plain records.
-- `runeguard audit verify`: CI-friendly verification command.
+- `runeguard audit verify`: CI-friendly cryptographic verification command.
+- `runeguard audit verify-retention`: manifest, segment, continuity, and retention verification.
 
 ## CLI
 
 ```bash
 runeguard audit verify .runeguard/audit.jsonl
 runeguard audit verify .runeguard/audit.jsonl --expected-head <hash>
+runeguard audit verify-retention --audit-dir .runeguard
+runeguard audit manifest --audit-dir .runeguard
+runeguard audit export --audit-dir .runeguard --destination ./worm-export
 RUNEGUARD_AUDIT_KEY=<hex> runeguard audit verify .runeguard/audit.jsonl
 RUNEGUARD_AUDIT_KEYFILE=/path/to/key runeguard audit verify .runeguard/audit.jsonl
 ```
@@ -76,7 +114,9 @@ Success exits `0` and prints the record count plus current head. Failure exits `
 
 ## Free/Paid Boundary
 
-- OSS: `chain` mode, `audit verify`, and the envelope format.
-- Paid: sealed key management, external anchoring/receipts, retention enforcement, WORM export, and an auditor-facing evidence pack.
+- OSS: `chain` mode, `audit verify`, retention manifest, local rotation, deletion detection, and local WORM-style export.
+- Paid/cloud: sealed key management, external anchoring/receipts, managed retention, real WORM export, and an auditor-facing evidence pack.
 
 Compliance claim caveat: describe this as producing a tamper-evident audit trail to help with record-keeping obligations, not as making a customer compliant.
+
+Local deletion caveat: local files cannot fully prevent deletion while the host can rewrite the filesystem. RuneGuard now detects missing retained segments through the manifest; legally stronger retention still requires external anchoring or true WORM storage.

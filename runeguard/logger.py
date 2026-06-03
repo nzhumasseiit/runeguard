@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from .audit import audit_record
+from .audit_compliance import ComplianceAuditLog
 from .decision import DecisionType
-from .integrity import TamperEvidentLog, load_key
 from .redaction import redact_value
 
 try:
@@ -81,7 +81,7 @@ def decision_record(
 
 
 def write_audit_record(path: str | Path, record: dict):
-    TamperEvidentLog(path, key=load_key()).append(redact_value(record))
+    ComplianceAuditLog(path).append(redact_value(record))
 
 
 def _command_from_kwargs(kwargs: dict) -> str | None:

@@ -3,6 +3,13 @@ import json
 from typer.testing import CliRunner
 
 from runeguard.audit import build_report, summarize_audit_log
+from runeguard.audit_compliance import (
+    AuditRetentionConfig,
+    ComplianceAuditLog,
+    LocalWORMExporter,
+    manifest_summary,
+    verify_retention,
+)
 from runeguard.cli import app
 from runeguard.integrity import TamperEvidentLog, verify_log
 from runeguard.logger import write_audit_record
@@ -49,6 +56,8 @@ def test_write_audit_record_writes_envelope_and_reports_unwrap_payload(tmp_path)
 
     persisted = _records(audit)[0]
     assert persisted["seq"] == 0
+    assert persisted["ts"]
+    assert persisted["mode"] == "chain"
     assert persisted["payload"]["decision"] == "block"
     assert verify_log(audit).ok
     assert summarize_audit_log(audit)["blocked"] == 1
@@ -198,3 +207,123 @@ def test_audit_verify_cli_reports_success_and_failure(tmp_path):
     failed = runner.invoke(app, ["audit", "verify", str(audit)])
     assert failed.exit_code == 1
     assert "TAMPER DETECTED" in failed.stderr
+
+
+def test_retention_manifest_defaults_to_at_least_180_days(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+
+    write_audit_record(audit, {"decision": "allow", "tool_call": "shell", "reason": "ok"})
+
+    manifest = manifest_summary(tmp_path)
+    segment = manifest["segments"][0]
+    assert segment["record_count"] == 1
+    assert segment["first_seq"] == 0
+    assert segment["last_seq"] == 0
+    assert segment["retention_until"] >= segment["created_at"]
+    assert verify_retention(tmp_path).ok
+
+
+def test_retention_below_180_days_is_rejected_unless_dev_override(tmp_path):
+    bad = AuditRetentionConfig(retention_days=30)
+    try:
+        bad.validate()
+    except ValueError as exc:
+        assert "at least 180" in str(exc)
+    else:
+        raise AssertionError("expected short retention to be rejected")
+
+    AuditRetentionConfig(retention_days=30, allow_short_retention_for_dev=True).validate()
+
+
+def test_rotation_creates_valid_linked_segments(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    config = AuditRetentionConfig(retention_days=180, rotation_max_bytes=1)
+    log = ComplianceAuditLog(audit, config=config)
+
+    log.append({"decision": "allow", "tool_call": "shell", "reason": "one"})
+    log.append({"decision": "block", "tool_call": "shell", "reason": "two"})
+
+    manifest = manifest_summary(tmp_path)
+    segments = manifest["segments"]
+    assert len(segments) == 2
+    assert segments[0]["status"] == "closed"
+    assert segments[1]["status"] == "open"
+    assert segments[1]["prev_segment_head"] == segments[0]["head_hash"]
+    assert verify_retention(tmp_path).ok
+
+
+def test_deleting_retained_segment_fails_verify_retention(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    log = ComplianceAuditLog(audit)
+    log.append({"decision": "allow", "tool_call": "shell", "reason": "one"})
+    closed = log.rotate()
+    assert closed is not None
+
+    (tmp_path / closed["path"]).unlink()
+
+    result = verify_retention(tmp_path)
+    assert not result.ok
+    assert "missing" in "\n".join(result.errors)
+    assert manifest_summary(tmp_path)["segments"][0]["deletion_status"] == "missing"
+
+
+def test_tail_truncation_is_detected_with_manifest_head(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    log = ComplianceAuditLog(audit)
+    for index in range(3):
+        log.append({"decision": "allow", "tool_call": "shell", "reason": str(index)})
+    records = _records(audit)
+    _save(audit, records[:-1])
+
+    result = verify_retention(tmp_path)
+
+    assert not result.ok
+    assert "mismatch" in "\n".join(result.errors)
+
+
+def test_local_worm_export_writes_receipts_and_refuses_overwrite(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    export_dir = tmp_path / "worm"
+    log = ComplianceAuditLog(audit)
+    log.append({"decision": "allow", "tool_call": "shell", "reason": "one"})
+    log.rotate()
+
+    receipts = LocalWORMExporter().export(tmp_path, export_dir)
+
+    assert receipts
+    assert list((export_dir / "receipts").glob("*.receipt.json"))
+    try:
+        LocalWORMExporter().export(tmp_path, export_dir)
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("expected exporter to refuse overwriting receipts")
+
+
+def test_audit_retention_cli_reports_missing_segment(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    log = ComplianceAuditLog(audit)
+    log.append({"decision": "allow", "tool_call": "shell", "reason": "one"})
+    closed = log.rotate()
+    (tmp_path / closed["path"]).unlink()
+
+    result = runner.invoke(app, ["audit", "verify-retention", "--audit-dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "RETENTION VIOLATION" in result.stderr
+
+
+def test_audit_manifest_and_export_cli(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    export_dir = tmp_path / "export"
+    log = ComplianceAuditLog(audit)
+    log.append({"decision": "allow", "tool_call": "shell", "reason": "one"})
+    log.rotate()
+
+    manifest = runner.invoke(app, ["audit", "manifest", "--audit-dir", str(tmp_path)])
+    exported = runner.invoke(app, ["audit", "export", "--audit-dir", str(tmp_path), "--destination", str(export_dir)])
+
+    assert manifest.exit_code == 0
+    assert '"segments"' in manifest.stdout
+    assert exported.exit_code == 0
+    assert "Exported" in exported.stdout
